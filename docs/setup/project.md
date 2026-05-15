@@ -19,15 +19,7 @@
 ### Step 1: Next.js 프로젝트 생성
 
 ```bash
-pnpm dlx create-next-app@latest . \
-  --typescript \
-  --tailwind \
-  --eslint \
-  --app \
-  --src-dir \
-  --import-alias '@/*' \
-  --no-git \
-  --skip-install
+pnpm dlx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias '@/*' --no-git --skip-install
 ```
 
 **각 옵션 설명:**
@@ -49,35 +41,80 @@ pnpm dlx create-next-app@latest . \
 # 패키지 설치
 pnpm install
 
-# shadcn/ui 초기화 (필수)
-pnpm dlx shadcn-ui@latest init -d
+# shadcn/ui 초기화 (Next.js 전용 템플릿, 2026 CLI v4 기준)
+pnpm dlx shadcn@latest init -t next
 ```
+
+> **설치 중 선택 가이드**
+>
+> | 프롬프트 | 선택값 | 설명 |
+> |---------|-------|------|
+> | Select a component library | **Radix** | shadcn/ui 기본 기반 컴포넌트 라이브러리 |
+> | Which preset would you like to use? | **Nova** | 현대적인 둥근 모서리·고채도 색상 프리셋 (기본 권장) |
+>
+> 다른 프리셋 참고:
+> - `Default` — 표준 shadcn 스타일
+> - `Sera` — 타이포그래피 중심, 세리프 헤딩 + 직각 모서리 (인쇄 디자인 스타일)
+>
+> 비주얼 빌더로 프리셋을 커스터마이징하려면: `pnpm dlx shadcn@latest init --preset [CODE] --template next`
 
 ### Step 3: 추가 라이브러리 설치
 
 ```bash
-pnpm add \
-  hono \
-  zod \
-  zustand \
-  @tanstack/react-query \
-  @google/generative-ai \
-  @clerk/nextjs \
-  @clerk/types \
-  framer-motion \
-  @mdxeditor/editor \
-  @hookform/resolvers \
-  react-hook-form
+pnpm add hono zod zustand @tanstack/react-query @google/genai @clerk/nextjs framer-motion @mdxeditor/editor @hookform/resolvers react-hook-form drizzle-orm @neondatabase/serverless
 ```
+
+> **변경 사항 (2026-05)**
+> - `@google/generative-ai` → `@google/genai` (SDK 패키지명 변경)
+> - `@clerk/types` 제거 — `@clerk/nextjs`에 타입 포함됨
+> - `drizzle-orm`, `@neondatabase/serverless` 추가 (이전 가이드 누락)
 
 ### Step 4: 개발 전용 의존성 설치
 
 ```bash
-pnpm add -D \
-  vitest \
-  @testing-library/react \
-  drizzle-kit
+pnpm add -D vitest @testing-library/react drizzle-kit
 ```
+
+### Step 5: 디자인 시스템 초기 설정 (globals.css)
+
+shadcn/ui 초기화 완료 후 `src/app/globals.css`를 Notion 스타일 테마로 교체합니다.
+
+#### 5-1. 색상 토큰 및 테두리 설정
+
+```css
+/* src/app/globals.css */
+@theme {
+  /* 배경 및 텍스트: Notion Warm Neutral */
+  --background: #ffffff;
+  --foreground: rgba(0, 0, 0, 0.95);
+
+  /* Primary CTA: Sage Green */
+  --primary: #99d1aa;
+  --primary-foreground: #ffffff;
+
+  /* 테두리: Whisper Border */
+  --border: rgba(0, 0, 0, 0.1);
+
+  /* 카드 그림자: Multi-layer Soft Shadow */
+  --shadow-card: 0 4px 18px rgba(0, 0, 0, 0.04), 0 2.025px 7.8px rgba(0, 0, 0, 0.02);
+}
+```
+
+#### 5-2. 타이포그래피 설정
+
+```css
+:root {
+  font-family: "Inter", "Pretendard", system-ui, sans-serif;
+}
+
+/* 히어로 헤드라인 전용 자간 압축 */
+.display-hero {
+  letter-spacing: -2.125px;
+  line-height: 1.0;
+}
+```
+
+> **폰트 참고**: 영문/숫자는 `Inter` (variable), 한글은 `Pretendard` 권장
 
 ---
 
@@ -106,6 +143,11 @@ DATABASE_URL=postgresql://user:password@ep-xxx-pooler.region.aws.neon.tech/indie
 
 #### 3-3. Drizzle ORM 초기 설정
 
+> **사용 버전 (2026-05 기준)**
+> - `drizzle-orm`: ^0.41.0
+> - `drizzle-kit`: ^0.31.0
+> - `@neondatabase/serverless`: ^0.10.0
+
 `drizzle.config.ts` 생성:
 
 ```typescript
@@ -120,9 +162,9 @@ if (!DATABASE_URL) {
 export default {
   schema: "./src/db/schema.ts",
   out: "./src/db/migrations",
-  driver: "pg",
+  dialect: "postgresql",           // drizzle-kit v0.22+ — `driver` 옵션 제거됨
   dbCredentials: {
-    connectionString: DATABASE_URL,
+    url: DATABASE_URL,
   },
 } satisfies Config;
 ```
@@ -200,11 +242,11 @@ export type Content = typeof contents.$inferSelect;
 #### 3-5. 마이그레이션 생성 및 실행
 
 ```bash
-# 마이그레이션 파일 생성
-pnpm exec drizzle-kit generate:pg
+# 마이그레이션 파일 생성 (drizzle-kit v0.22+)
+pnpm drizzle-kit generate
 
 # 마이그레이션 실행
-pnpm exec drizzle-kit migrate
+pnpm drizzle-kit migrate
 ```
 
 생성된 파일: `src/db/migrations/0000_*.sql`
@@ -240,22 +282,24 @@ NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 ```typescript
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-const isProtectedRoute = createRouteMatcher([
-  "/dashboard(.*)",
-  "/api(.*)",
-  "!/api/webhooks(.*)",
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/api/webhooks(.*)",
 ]);
 
-export default clerkMiddleware((auth, req) => {
-  if (isProtectedRoute(req)) {
-    auth().protect();
+export default clerkMiddleware(async (auth, req) => {
+  if (!isPublicRoute(req)) {
+    await auth.protect();
   }
 });
 
 export const config = {
   matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|gif|svg|ttf|woff2?|ico|cur|ani|eot)(?:\\?.*)?$).*)",
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",
+    "/__clerk/(.*)",
   ],
 };
 ```
@@ -395,3 +439,7 @@ SVIX_WEBHOOK_SECRET=...           # X
 - [TRD.md](./TRD.md) — 기술 명세서
 - [IA.md](./IA.md) — 정보 구조도
 - [PRD.md](./PRD.md) — 제품 요구사항
+- [docs/design/notion.md](../design/notion.md) — Notion 스타일 브랜드 SSOT
+- [docs/design/design_guide-common.md](../design/design_guide-common.md) — 공통 디자인 시스템 (색상 토큰, 모션, 접근성)
+- [docs/design/design_guide-web.md](../design/design_guide-web.md) — 웹 전용 레이아웃 및 반응형 가이드
+- [docs/tech/shadcn.md](../tech/shadcn.md) — shadcn/ui + Lucide React 사용 가이드

@@ -18,8 +18,8 @@
 | UC-04 | 비밀번호 찾기 | `02-usecase-인증.md` | 2 | `Visitor` | `docs/tech/clerk.md` |
 | UC-05 | 로그아웃 | `02-usecase-인증.md` | 2 | `User` | `docs/tech/clerk.md` |
 | UC-06 | 대시보드 홈 | `03-usecase-대시보드.md` | 3 | `User` | `docs/tech/neon.md` |
-| UC-07 | 콘텐츠 생성 폼 | `04-usecase-콘텐츠생성.md` | 4 | `User` | `docs/tech/gemini.md`, `docs/tech/neon.md` |
-| UC-08 | AI 스트리밍 생성 | `04-usecase-콘텐츠생성.md` | 4 | `User`, `System` | `docs/tech/gemini.md` |
+| UC-07 | 콘텐츠 생성 폼 | `04-usecase-콘텐츠생성.md` | 4 | `User` | `docs/tech/gemini_tech.md`, `docs/tech/neon.md` |
+| UC-08 | AI 스트리밍 생성 | `04-usecase-콘텐츠생성.md` | 4 | `User`, `System` | `docs/tech/gemini_tech.md` |
 | UC-09 | 생성 결과 에디터 | `04-usecase-콘텐츠생성.md` | 4 | `User` | `docs/tech/neon.md` |
 | UC-10 | 지침 목록 조회 | `05-usecase-지침관리.md` | 5 | `User` | `docs/tech/neon.md` |
 | UC-11 | 지침 생성 | `05-usecase-지침관리.md` | 5 | `User` | `docs/tech/neon.md` |
@@ -263,7 +263,7 @@ API 응답 500 감지
 | UC-01 랜딩 | `docs/tech/shadcn.md`, `docs/design/design_guide-web.md` | 컴포넌트 조합, Aceternity UI·Magic UI 사용 패턴 |
 | UC-02~05 인증 | `docs/tech/clerk.md` | Clerk Elements 커스텀 UI, 미들웨어 설정, JWT 검증 |
 | UC-06 대시보드 | `docs/tech/neon.md`, `docs/framework/Nextjs.md` | Neon 연결, Server Component 데이터 페칭 패턴 |
-| UC-07~09 콘텐츠 생성 | `docs/tech/gemini.md`, `docs/tech/neon.md` | Gemini 스트리밍 API, 생성 결과 DB 저장 |
+| UC-07~09 콘텐츠 생성 | `docs/tech/gemini_tech.md`, `docs/tech/neon.md` | Gemini 스트리밍 API, 생성 결과 DB 저장 |
 | UC-10~14 지침 관리 | `docs/tech/neon.md`, `docs/framework/Nextjs.md` | CRUD API(Hono), Neon ORM 패턴 |
 
 ---

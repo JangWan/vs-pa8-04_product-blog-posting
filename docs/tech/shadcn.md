@@ -1,17 +1,30 @@
 ---
-description: shadcn/ui + Lucide React 가이드라인 (React 생태계 공통)
+description: shadcn/ui + Lucide React 가이드라인 (Next.js / React 생태계 공통)
 globs: "src/**/*.ts,src/**/*.tsx"
 ---
 
 # shadcn/ui + Lucide React 가이드라인 (2026 Edition)
 
-> 기준: 2026년 5월 / shadcn/ui (latest) / React 생태계 공통
+> 기준: 2026년 5월 / shadcn/ui CLI v4 / Next.js App Router / Tailwind CSS v4
 > 선택 조건: PRD의 타겟 플랫폼이 web이고, 커스터마이징 가능한 컴포넌트 라이브러리가 필요한 경우
-> 의존성: Tailwind CSS v4 필수 (docs/tech/tailwind.md 참조)
+> 의존성: Tailwind CSS v4 필수
 
 ---
 
-## 1. 선택 기준
+## 1. 라이브러리 버전 (2026-05 기준)
+
+| 패키지 | 버전 | 역할 |
+|-------|------|------|
+| `shadcn` (CLI) | latest (v4+) | 컴포넌트 설치 CLI |
+| `@radix-ui/*` | ^1.x ~ ^2.x | 기반 Headless 컴포넌트 |
+| `lucide-react` | ^0.475.0 | 아이콘 라이브러리 |
+| `class-variance-authority` | ^0.7.x | 변형(variant) 관리 |
+| `clsx` | ^2.x | 조건부 className 합성 |
+| `tailwind-merge` | ^2.x | Tailwind 클래스 충돌 해결 |
+
+---
+
+## 2. 선택 기준
 
 | 상황 | shadcn/ui 선택 | 대안 |
 |------|---------------|------|
@@ -20,11 +33,11 @@ globs: "src/**/*.ts,src/**/*.tsx"
 | 기업용 데이터 그리드, 복잡한 폼 | ⚠️ Mantine 고려 | - |
 | 빠른 MVP, 표준 컴포넌트 세트 | ✅ 적합 | - |
 
-> ✅ **shadcn/ui 선택 시 자동 포함**: Lucide React (아이콘), Magic UI, Aceternity UI (선택적 확장)
+> ✅ **shadcn/ui 선택 시 자동 포함**: Lucide React (아이콘), Magic UI·Aceternity UI (선택적 확장 가능)
 
 ---
 
-## 2. 라이브러리 역할 구분
+## 3. 라이브러리 역할 구분
 
 | 라이브러리 | 역할 | 사용 시점 |
 |-----------|------|----------|
@@ -37,23 +50,72 @@ globs: "src/**/*.ts,src/**/*.tsx"
 
 ---
 
-## 3. 설치 및 초기 설정
+## 4. Next.js 설치 및 초기 설정
+
+### 4-1. CLI 초기화 (Next.js 전용 템플릿)
 
 ```bash
-# 1. shadcn/ui 초기화 (Tailwind CSS v4 환경)
-npx shadcn@latest init
+# Next.js 프로젝트 신규 생성 + shadcn/ui 동시 초기화
+pnpm dlx shadcn@latest init -t next
+```
 
-# 2. 컴포넌트 추가 (필요한 것만 선택)
-npx shadcn@latest add button input dialog form card
-npx shadcn@latest add table select textarea badge
+#### 설치 중 선택 가이드
 
-# 3. Lucide React는 shadcn/ui 의존성으로 자동 설치됨
-# 별도 설치 불필요
+```
+√ Select a component library » Radix      ← 기본값, 변경 불필요
+√ Which preset would you like to use? » Nova
+```
+
+| 선택 항목 | 권장 값 | 이유 |
+|---------|--------|------|
+| **Component library** | `Radix` | shadcn/ui 공식 기반. 접근성·안정성 검증됨 |
+| **Preset** | `Nova` | 현대적 둥근 모서리·고채도 팔레트. 빠른 MVP에 최적 |
+
+#### 프리셋 비교표
+
+| 프리셋 | 모서리 | 색상 | 특징 |
+|-------|-------|------|------|
+| `Default` | 소폭 라운딩 | 표준 | shadcn 전통 스타일 |
+| `Nova` | 중간 라운딩 | 고채도·선명 | 현대적 SaaS 스타일 ✅ 권장 |
+| `Sera` | 직각 | 차분 | 타이포그래피 중심, 인쇄 디자인 영향 |
+
+> 비주얼 빌더로 프리셋을 커스터마이징하려면:
+> ```bash
+> pnpm dlx shadcn@latest init --preset [CODE] --template next
+> ```
+
+### 4-2. 기존 프로젝트에 추가
+
+```bash
+# tsconfig.json에 paths 별칭이 설정된 상태에서 실행
+pnpm dlx shadcn@latest init
+```
+
+`tsconfig.json` 확인 사항:
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}
+```
+
+### 4-3. 컴포넌트 추가
+
+```bash
+# 단일 컴포넌트
+pnpm dlx shadcn@latest add button
+
+# 복수 컴포넌트 (필요한 것만 선택)
+pnpm dlx shadcn@latest add button input dialog form card
+pnpm dlx shadcn@latest add table select textarea badge
 ```
 
 ---
 
-## 4. 컴포넌트 사용 원칙
+## 5. 컴포넌트 사용 원칙
 
 ### 기존 컴포넌트 우선 재사용
 ```tsx
@@ -65,7 +127,6 @@ import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog"
 
 ### 모든 UI 컴포넌트는 Client Component
 ```tsx
-// ✅ 인터랙션이 있는 모든 컴포넌트
 "use client"
 import { Button } from "@/components/ui/button"
 
@@ -76,7 +137,7 @@ export function SubmitButton() {
 
 ---
 
-## 5. Lucide React 아이콘 사용법
+## 6. Lucide React 아이콘 사용법
 
 ```tsx
 // ✅ tree-shakeable — 필요한 아이콘만 import
@@ -87,21 +148,21 @@ import { Search, Bell, User, ChevronRight } from "lucide-react"
 <Bell className="h-5 w-5 text-primary" />
 
 // 다른 아이콘 라이브러리 금지 — Lucide React 단일화
-// ❌ import { FaSearch } from "react-icons/fa"  // 금지
+// ❌ import { FaSearch } from "react-icons/fa"
 ```
 
 ---
 
-## 6. Magic UI 사용 가이드
+## 7. Magic UI 사용 가이드
 
-> 설치: `npx magic-ui@latest add [컴포넌트명]`
+```bash
+# Magic UI 컴포넌트 추가
+pnpm dlx shadcn@latest add "https://magicui.design/r/typing-animation"
+```
 
 ```tsx
-// 텍스트 애니메이션 예시
 import { TypingAnimation } from "@/components/magicui/typing-animation"
 import { AnimatedShinyText } from "@/components/magicui/animated-shiny-text"
-
-// Ripple 효과 예시
 import { Ripple } from "@/components/magicui/ripple"
 
 // 사용 시점: CTA 버튼, 히어로 섹션, 피드백 인터랙션
@@ -109,12 +170,11 @@ import { Ripple } from "@/components/magicui/ripple"
 
 ---
 
-## 7. Aceternity UI 사용 가이드
+## 8. Aceternity UI 사용 가이드
 
 > 설치: 컴포넌트별 수동 복사 (https://ui.aceternity.com/components)
 
 ```tsx
-// 배경 효과 예시
 import { BackgroundGradient } from "@/components/aceternity/background-gradient"
 import { CardHoverEffect } from "@/components/aceternity/card-hover-effect"
 
@@ -124,7 +184,7 @@ import { CardHoverEffect } from "@/components/aceternity/card-hover-effect"
 
 ---
 
-## 8. 컴포넌트 커스터마이징
+## 9. 컴포넌트 커스터마이징
 
 ```tsx
 // shadcn/ui 컴포넌트 확장 패턴 (원본 수정 금지)
