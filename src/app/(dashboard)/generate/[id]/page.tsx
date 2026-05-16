@@ -176,7 +176,7 @@ export default function GenerateEditorPage({
 
   if (isLoading) {
     return (
-      <div className="max-w-4xl mx-auto space-y-4">
+      <div className="space-y-4">
         <Skeleton className="h-8 w-1/3" />
         <Skeleton className="h-4 w-1/4" />
         <Skeleton className="h-96 w-full rounded-lg" />
@@ -191,7 +191,7 @@ export default function GenerateEditorPage({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
-      className="max-w-4xl mx-auto space-y-5"
+      className="space-y-5"
     >
       {/* 상단 네비게이션 */}
       <div className="flex items-center gap-2">

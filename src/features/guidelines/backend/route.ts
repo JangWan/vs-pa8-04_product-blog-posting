@@ -9,7 +9,7 @@ const guidelinesRoute = new Hono<{ Variables: { userId: string } }>();
 
 const guidelineSchema = z.object({
   title: z.string().min(1).max(100),
-  content: z.string().min(1).max(5000),
+  content: z.string().min(1).max(2000),
   is_default: z.boolean().optional().default(false),
 });
 

@@ -1,6 +1,6 @@
 # 구현 진행 상태 — IndiePost AI
 
-> 마지막 업데이트: 2026-05-16
+> 마지막 업데이트: 2026-05-17
 > 참조: docs/usecase/usecase-common.md §0 (전체 UC 목록)
 
 ---
@@ -104,11 +104,12 @@
 | 05-03 | GET /api/guidelines/:id — 단건 조회 | ✅ 완료 | |
 | 05-04 | PUT /api/guidelines/:id — 수정/기본 설정 | ✅ 완료 | |
 | 05-05 | DELETE /api/guidelines/:id — 삭제 | ✅ 완료 | |
-| 05-06 | 지침 목록 페이지 (/guidelines) | ❌ 미완료 | 플레이스홀더 |
-| 05-07 | 지침 생성 페이지 (/guidelines/new) | ❌ 미완료 | 플레이스홀더 |
-| 05-08 | 지침 수정 페이지 (/guidelines/[id]) | ❌ 미완료 | 플레이스홀더 |
-| 05-09 | 삭제 확인 AlertDialog | ❌ 미완료 | |
-| 05-10 | 기본 지침 설정 토글 | ❌ 미완료 | BR-11 단일 기본 지침 |
+| 05-06 | 지침 목록 페이지 (/guidelines) | ✅ 완료 | stagger 등장 카드 + 헤더 "+" 버튼 + Empty State |
+| 05-07 | 지침 생성 페이지 (/guidelines/new) | ✅ 완료 | breadcrumb + GuidelineForm 공통 컴포넌트 |
+| 05-08 | 지침 수정 페이지 (/guidelines/[id]) | ✅ 완료 | useGuideline prefill + 404/403 인라인 처리 |
+| 05-09 | 삭제 확인 AlertDialog | ✅ 완료 | 본문 메시지 BR-12 반영 (이력 "삭제된 지침" 표시 안내) |
+| 05-10 | 기본 지침 설정 토글 | ✅ 완료 | Star 아이콘 토글 · 이미 기본 시 인라인 토스트 (UC §4-1) |
+| 05-11 | API content 길이 정렬 (max 2000자) | ✅ 완료 | UC §8 명세에 맞춰 Zod 스키마 max(5000) → max(2000) |
 
 ---
 
@@ -121,5 +122,30 @@
 [완료] UC-06 대시보드 (전체)
 [완료] UC-07~09 콘텐츠 생성 (전체 — API + 폼 + 에디터)
 [완료] UC-10~14 API (GET/POST/PUT/DELETE /api/guidelines)
-[다음] UC-10~14 지침 관리 UI (/guidelines, /guidelines/new, /guidelines/[id])
+[완료] UC-10~14 지침 관리 UI (목록 · 생성 · 수정 · 삭제 · 기본 설정)
+[다음] (Phase 2) UC-15 생성 이력 페이지 (/history, 커서 기반 무한스크롤)
 ```
+
+---
+
+## UC-10~14 구현 요약 (2026-05-17)
+
+**파일 추가/수정**
+- `src/features/guidelines/hooks/use-guidelines.ts` — `useGuideline`(단건), `useCreateGuideline`, `useUpdateGuideline`, `useDeleteGuideline`, `useSetDefaultGuideline` mutations 추가. queryClient 무효화로 목록·단건 캐시 자동 갱신.
+- `src/features/guidelines/components/guideline-form.tsx` — 생성·수정 공통 폼. 제목 100자/내용 2000자 카운터, 클라이언트 유효성 (UC §5-1·5-2), 취소 → /guidelines 라우팅.
+- `src/app/(dashboard)/guidelines/page.tsx` — Framer Motion stagger 카드 목록, 기본 Badge(Sage Green), 수정/삭제/기본설정 버튼, AlertDialog 삭제 확인, Empty State (BookOpen), 헤더 "+" CTA, 스켈레톤 3개.
+- `src/app/(dashboard)/guidelines/new/page.tsx` — breadcrumb + GuidelineForm 호출. 성공 시 "지침이 저장되었습니다." 토스트 → /guidelines.
+- `src/app/(dashboard)/guidelines/[id]/page.tsx` — `use(params)` 패턴 (Next.js 16), `useGuideline` prefill, 404/403 인라인 처리, 동일 토스트/리다이렉트.
+- `src/features/guidelines/backend/route.ts` — Zod `content.max(5000)` → `max(2000)` (UC §8 명세 정렬).
+
+**핵심 UX 결정**
+- 카드 우측 액션은 모바일에서 아이콘만 표시 (`hidden sm:inline`로 라벨 토글).
+- 기본 지침 카드의 "기본으로 설정" 버튼은 disabled + Star 채움 아이콘 + "기본 지침" 텍스트로 상태 시각화.
+- 이미 기본인 카드를 다시 누르면 API 호출 없이 `toast.info` 인라인 안내 (UC §4-1).
+- 삭제 AlertDialog 본문은 BR-12 명시 ("이력에서 '삭제된 지침'으로 표시").
+- 수정 페이지 breadcrumb는 prefill된 제목을 truncate 표시.
+
+**검증**
+- `pnpm type-check` 통과
+- `pnpm build` 통과 (10개 정적 페이지 prerender 성공)
+- `pnpm lint` — guidelines 관련 신규 코드 0 위반 (기존 generate 페이지 `react-hooks/set-state-in-effect` 2건은 별도 이슈)

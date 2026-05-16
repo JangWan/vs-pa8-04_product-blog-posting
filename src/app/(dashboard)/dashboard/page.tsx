@@ -178,7 +178,7 @@ export default function DashboardPage() {
   const isEmptyState = !guidelinesLoading && !guidelinesError && guidelines.length === 0;
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    <div className="space-y-8">
       {/* 페이지 헤더 */}
       <div>
         <h1 className="text-2xl font-semibold text-foreground tracking-tight">

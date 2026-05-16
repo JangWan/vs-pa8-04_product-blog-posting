@@ -189,16 +189,18 @@ export default function GeneratePage() {
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
-      className="max-w-2xl mx-auto space-y-6"
+      className="space-y-6"
     >
+      {/* 헤더는 wide 영역 활용 */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">콘텐츠 생성</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">콘텐츠 생성</h1>
         <p className="text-sm text-muted-foreground mt-1">
           주제를 입력하면 AI가 SEO 최적화된 블로그 초안을 작성합니다.
         </p>
       </div>
 
-      <div className="space-y-5">
+      {/* 폼 본체는 가독성을 위해 max-w-3xl 제한 */}
+      <div className="max-w-3xl space-y-5">
         {/* 주제 */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
@@ -352,7 +354,7 @@ export default function GeneratePage() {
         )}
       </div>
 
-      {/* 스트리밍 미리보기 */}
+      {/* 스트리밍 미리보기 — 폼과 동일한 너비로 정렬 */}
       <AnimatePresence>
         {showPreview && (
           <motion.div
@@ -360,6 +362,7 @@ export default function GeneratePage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
+            className="max-w-3xl"
           >
             <StreamingPreview text={streamText} streamRef={streamRef} />
           </motion.div>
