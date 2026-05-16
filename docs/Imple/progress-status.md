@@ -1,6 +1,6 @@
 # 구현 진행 상태 — IndiePost AI
 
-> 마지막 업데이트: 2026-05-15
+> 마지막 업데이트: 2026-05-16
 > 참조: docs/usecase/usecase-common.md §0 (전체 UC 목록)
 
 ---
@@ -68,13 +68,16 @@
 
 | # | 항목 | 상태 | 비고 |
 |---|------|------|------|
-| 03-01 | DashboardLayout (Sidebar + MobileHeader + Sheet) | ❌ 미완료 | |
-| 03-02 | Sidebar 컴포넌트 (네비게이션 + UserButton) | ❌ 미완료 | |
-| 03-03 | 대시보드 홈 페이지 | ❌ 미완료 | |
-| 03-04 | 최근 생성 5개 카드 (GET /api/history?limit=5) | ❌ 미완료 | |
-| 03-05 | 지침 현황 표시 | ❌ 미완료 | |
-| 03-06 | Empty State (지침 0개) | ❌ 미완료 | |
-| 03-07 | 스켈레톤 로딩 | ❌ 미완료 | |
+| 03-01 | DashboardLayout (Sidebar + MobileHeader + Sheet) | ✅ 완료 | Sidebar·MobileHeader·Toaster 통합 |
+| 03-02 | Sidebar 컴포넌트 (네비게이션 + SidebarUserButton) | ✅ 완료 | 활성 상태 Sage Green 좌측 보더, 드롭다운 계정관리·로그아웃 |
+| 03-03 | 대시보드 홈 페이지 | ✅ 완료 | 빠른 시작 CTA + 최근 생성 + 지침 현황 |
+| 03-04 | 최근 생성 5개 카드 (GET /api/history?limit=5) | ✅ 완료 | TanStack Query · Framer Motion stagger |
+| 03-05 | 지침 현황 표시 | ✅ 완료 | 지침 수 + 기본 지침 제목 표시 |
+| 03-06 | Empty State (지침 0개 신규 사용자) | ✅ 완료 | 강조 배너 + "지침 등록하기" CTA |
+| 03-07 | 스켈레톤 로딩 | ✅ 완료 | ContentCardSkeleton · GuidelinesSkeletonSection |
+| 03-08 | Hono API 진입점 (/api/[[...hono]]/route.ts) | ✅ 완료 | Next.js → Hono 위임, 싱글턴 패턴 |
+| 03-09 | GET /api/history (Hono 라우트) | ✅ 완료 | Clerk auth → Drizzle JOIN · limit 쿼리 |
+| 03-10 | GET /api/guidelines (Hono 라우트) | ✅ 완료 | Clerk auth → Drizzle 조회 |
 
 ---
 
@@ -119,22 +122,28 @@
 [완료] ENV 설정 수정 (ENV-04~07, ENV-12, ENV-13 완료)
 [완료] UC-01 랜딩 페이지 (01-01~07, 01-09 완료 | 01-08 Framer Motion 미완료)
 [완료] UC-02~05 인증 (02-01~08 전체 완료)
-[다음] UC-06 대시보드 (ENV-09, ENV-10, ENV-14 설정 완료 후 진행)
+[완료] UC-06 대시보드 (03-01~10 전체 완료 | DB 설정 완료 후 API 동작)
+[다음] UC-07~09 콘텐츠 생성 (ENV-09, ENV-10, ENV-14 설정 후 진행)
 ```
 
 ### 사용자 액션 필요 항목 (다음 단계 진행 전)
 
-1. **패키지 수정** (ENV-03a):
+1. **shadcn 컴포넌트 추가** (UC-06 UI 완성):
+   ```bash
+   pnpm dlx shadcn@latest add sheet skeleton badge sonner
+   ```
+
+2. **패키지 수정** (ENV-03a):
    ```bash
    pnpm remove @google/generative-ai @clerk/types postgres
    pnpm add @google/genai @neondatabase/serverless
    ```
 
-2. **Neon DB 생성** (ENV-09): https://neon.tech → 프로젝트 생성 → DATABASE_URL 복사
+3. **Neon DB 생성** (ENV-09): https://neon.tech → 프로젝트 생성 → DATABASE_URL 복사
 
-3. **Clerk 프로젝트 생성** (ENV-10): https://clerk.com → 앱 생성 → API Keys 복사
+4. **Clerk 프로젝트 생성** (ENV-10): https://clerk.com → 앱 생성 → API Keys 복사
 
-4. **.env.local 생성** (ENV-08): 아래 내용으로 파일 생성
+5. **.env.local 생성** (ENV-08): 아래 내용으로 파일 생성
    ```env
    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
    CLERK_SECRET_KEY=sk_test_...
@@ -144,4 +153,10 @@
    DATABASE_URL=postgresql://...@ep-xxx-pooler.region.aws.neon.tech/dbname?sslmode=require
    GOOGLE_GENAI_API_KEY=AIzaSy...
    GEMINI_MODEL=gemini-3.1-flash
+   ```
+
+6. **DB 마이그레이션** (ENV-14): ENV-09 완료 후
+   ```bash
+   pnpm drizzle-kit generate
+   pnpm drizzle-kit migrate
    ```
