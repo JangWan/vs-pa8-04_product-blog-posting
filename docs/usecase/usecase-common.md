@@ -1,7 +1,11 @@
 # Usecase Common — IndiePost AI
 > 공통 정의 문서 (모든 기능별 Usecase가 참조)  
-> 작성일: 2026-05-15 | 버전: v1.0  
-> 참조: PRD.md · IA.md
+> 작성일: 2026-05-15 | 버전: v1.1 (2026-05-17 Phase 2 확장)  
+> 참조: PRD.md · IA.md · TRD.md
+>
+> **변경 이력**
+> - v1.0 (2026-05-15) 최초 작성 — UC-01~14
+> - v1.1 (2026-05-17) Phase 2 확장 — UC-15~22 추가, BR-18~24 추가, 토스트·모달·Empty State 표 확장
 
 ---
 
@@ -26,6 +30,14 @@
 | UC-12 | 지침 수정 | `05-usecase-지침관리.md` | 5 | `User` | `docs/tech/neon.md` |
 | UC-13 | 지침 삭제 | `05-usecase-지침관리.md` | 5 | `User` | `docs/tech/neon.md` |
 | UC-14 | 기본 지침 설정 | `05-usecase-지침관리.md` | 5 | `User` | `docs/tech/neon.md` |
+| UC-15 **(Phase 2)** | 이력 상세 조회 | [`06-usecase-콘텐츠이력.md`](06-usecase-콘텐츠이력.md) | 6 | `User` | `docs/tech/neon.md` |
+| UC-16 **(Phase 2)** | 버전 목록·미리보기 | [`06-usecase-콘텐츠이력.md`](06-usecase-콘텐츠이력.md) | 6 | `User` | `docs/tech/neon.md` |
+| UC-17 **(Phase 2)** | 버전 수동 스냅샷 | [`06-usecase-콘텐츠이력.md`](06-usecase-콘텐츠이력.md) | 6 | `User` | `docs/tech/neon.md` |
+| UC-18 **(Phase 2)** | 버전 복원 | [`06-usecase-콘텐츠이력.md`](06-usecase-콘텐츠이력.md) | 6 | `User` | `docs/tech/neon.md` |
+| UC-19 **(Phase 2)** | 두 버전 비교 (Diff) | [`06-usecase-콘텐츠이력.md`](06-usecase-콘텐츠이력.md) | 6 | `User` | `docs/tech/neon.md` |
+| UC-20 **(Phase 2)** | 번역 생성 (스트리밍) | [`07-usecase-다국어번역.md`](07-usecase-다국어번역.md) | 7 | `User`, `System` | `docs/tech/gemini_tech.md` |
+| UC-21 **(Phase 2)** | 번역 조회·재생성 | [`07-usecase-다국어번역.md`](07-usecase-다국어번역.md) | 7 | `User`, `System` | `docs/tech/gemini_tech.md` |
+| UC-22 **(Phase 2)** | 번역 삭제 | [`07-usecase-다국어번역.md`](07-usecase-다국어번역.md) | 7 | `User` | `docs/tech/neon.md` |
 
 ### 구현 순서 근거
 
@@ -36,6 +48,8 @@
 | 3 — 대시보드 | 인증 후 진입점. 내비게이션 셸(Shell) 먼저 완성 |
 | 4 — 콘텐츠 생성 | 핵심 가치(MVP 기능 F1·F3) 구현 |
 | 5 — 지침 관리 | 콘텐츠 생성 품질 향상을 위한 보조 기능 |
+| 6 — 콘텐츠 이력 (Phase 2) | MVP 출시 후 사용자 데이터가 누적되면 회고·복원 가치가 부각됨 |
+| 7 — 다국어 번역 (Phase 2) | 이력 인프라(상세 페이지·소유권 검증) 위에 얹는 부가 가치 — 콘텐츠 이력 먼저 |
 
 ### Phase 2 — 생성 이력 (`/history`) 페이지네이션 방식
 
@@ -109,6 +123,13 @@
 | BR-15 | 마크다운 다운로드 파일명     | `YYYY-MM-DD-주제명(slug).md` 형식. 예: `2026-05-15-nextjs-saas-후기.md`                                                    |
 | BR-16 | users 테이블 동기화     | Clerk `user.created` Webhook 이벤트 수신 시 서버가 `users` 테이블에 INSERT. 클라이언트에서 직접 호출 금지.                                   |
 | BR-17 | 에디터 수동 저장         | `/generate/[id]` 에디터에서 편집 후 "저장" 버튼 클릭 시에만 DB 업데이트. 자동 저장 없음. 저장 전 이탈 시 편집 내용 소실.                                  |
+| BR-18 **(P2)** | 편집본 자동 스냅샷 | `PUT /api/history/:id`로 본문이 변경 저장될 때, 서버가 직전 본문을 자동으로 `content_versions`에 INSERT한다. 본문이 동일하면 스냅샷 생성 안 함. |
+| BR-19 **(P2)** | 버전 복원 안전장치 | 버전 복원(`POST .../versions/:no/restore`) 직전에 현재 `contents.body`를 새 버전으로 자동 스냅샷한 후 복원을 수행한다. 사용자가 실수로 복원해도 직전 상태로 되돌릴 수 있다. |
+| BR-20 **(P2)** | 버전 본문 크기 제한 | `snapshot_body` 최대 100KB(약 5만자). 초과 시 서버는 400을 반환하고 사용자에게 본문 분할을 안내한다. |
+| BR-21 **(P2)** | 번역 quota 1회 안내 | 번역 첫 시도 시 "번역도 AI 생성 횟수에 포함됩니다" 안내 모달을 1회만 노출한다. 노출 후 `LocalStorage["translation_quota_notice_seen"] = "true"`로 재노출 방지. |
+| BR-22 **(P2)** | 번역 언어 제약 | 지원 언어는 `ko`·`en` 두 가지로 제한. 원문(`contents.source_lang`)과 동일 언어로의 번역은 불가능 — 번역 모달의 언어 Dropdown에서 해당 옵션이 비활성화된다. |
+| BR-23 **(P2)** | 번역 덮어쓰기 정책 | 동일 `(content_id, target_lang)`에 이미 `status='completed'` 행이 있으면 서버는 409를 반환한다. 사용자 확인 후 `force=true`로 재요청 시에만 덮어쓴다. |
+| BR-24 **(P2)** | 콘텐츠 이력 삭제 연쇄 | `contents` DELETE 시 `content_versions`·`content_translations`가 외래키 ON DELETE CASCADE로 함께 삭제된다. 별도 정리 작업 불필요. |
 
 ---
 
@@ -182,6 +203,12 @@ API 응답 500 감지
 | 지침 삭제 성공 | "지침이 삭제되었습니다." | 05-usecase-지침관리 참조 |
 | 콘텐츠 복사 성공 | "클립보드에 복사되었습니다." | 04-usecase-콘텐츠생성 참조 |
 | AI 초안 생성 완료 | "초안 생성이 완료되었습니다." | 04-usecase-콘텐츠생성 참조 |
+| 이력 삭제 성공 **(P2)** | "이력이 삭제되었습니다." | [06-usecase-콘텐츠이력](06-usecase-콘텐츠이력.md) 참조 |
+| 버전 스냅샷 저장 성공 **(P2)** | "버전이 저장되었습니다." | [06-usecase-콘텐츠이력](06-usecase-콘텐츠이력.md) 참조 |
+| 버전 복원 성공 **(P2)** | "버전 v{N}으로 복원되었습니다. 직전 본문은 새 버전으로 저장되었습니다." | [06-usecase-콘텐츠이력](06-usecase-콘텐츠이력.md) 참조 |
+| 버전 동일 안내 **(P2)** | "이미 해당 버전 상태입니다." (warning) | [06-usecase-콘텐츠이력](06-usecase-콘텐츠이력.md) 참조 |
+| 번역 생성 완료 **(P2)** | "{언어명} 번역이 완료되었습니다." | [07-usecase-다국어번역](07-usecase-다국어번역.md) 참조 |
+| 번역 삭제 성공 **(P2)** | "번역본이 삭제되었습니다." | [07-usecase-다국어번역](07-usecase-다국어번역.md) 참조 |
 
 > 모든 성공 토스트: shadcn/ui `<Toaster>` — 우하단, 5초 자동 닫힘.
 
@@ -193,6 +220,10 @@ API 응답 500 감지
 |---------|-----------------|
 | 지침 삭제 | ✅ 사용 |
 | 생성 이력 삭제 (Phase 2) | ✅ 사용 |
+| 버전 복원 (Phase 2) | ✅ 사용 — 본문에 BR-19 안전장치 안내 ("직전 본문은 새 버전으로 저장됩니다") 포함 |
+| 번역 덮어쓰기 (Phase 2) | ✅ 사용 — BR-23 (`force=true`) 재요청 전 사용자 확인 |
+| 번역 삭제 (Phase 2) | ✅ 사용 |
+| 번역 quota 안내 (Phase 2) | ℹ️ 단순 안내 모달 (`<Dialog>`) — `AlertDialog` 아님, BR-21에 따라 1회만 |
 | 지침 저장·수정 | ❌ 미사용 |
 | 기본 지침 변경 | ❌ 미사용 |
 
@@ -210,6 +241,8 @@ API 응답 500 감지
 | `/dashboard` | 지침 0개 | "먼저 AI 지침을 등록해보세요" + "지침 등록하기" CTA |
 | `/guidelines` | 지침 0개 | "첫 번째 AI 지침을 등록해보세요" + "+" 버튼 안내 |
 | `/history` (Phase 2) | 이력 0개 | "아직 생성한 콘텐츠가 없습니다" + "생성 시작" CTA |
+| `/history/[id]/versions` **(P2)** | 버전 0개 | "아직 저장된 버전이 없습니다. 본문을 편집하면 자동으로 버전이 쌓입니다." |
+| `/history/[id]` 번역 탭 **(P2)** | 해당 언어 번역 없음 | "{언어명} 번역본이 없습니다." + "번역하기" CTA (→ UC-20 모달 진입) |
 
 ---
 
@@ -245,6 +278,10 @@ API 응답 500 감지
 | 초안 | AI가 생성한 마크다운 형식의 블로그 글 (`contents` 테이블의 `body`) |
 | 기본 지침 | `is_default=true`인 지침. 콘텐츠 생성 시 별도 선택 없이 자동 적용됨. |
 | 생성 이력 | 과거에 생성된 콘텐츠 목록 (`contents` 테이블 전체) |
+| 버전 **(P2)** | 특정 시점의 본문 스냅샷 (`content_versions` 1행). `version_no`는 콘텐츠 단위로 1부터 증가. |
+| 현재 버전 **(P2)** | `contents.body`와 동일한 스냅샷. 버전 목록에서 "현재" Badge로 표시. |
+| 원문 언어 **(P2)** | 콘텐츠 생성 시점의 본문 언어 (`contents.source_lang`, 기본 `'ko'`). |
+| 번역본 **(P2)** | 원문 외 언어로 생성된 마크다운 (`content_translations.translated_body`). 콘텐츠+언어당 최대 1개. |
 
 ### 6-2. 공통 참조 문서
 
@@ -265,6 +302,8 @@ API 응답 500 감지
 | UC-06 대시보드 | `docs/tech/neon.md`, `docs/framework/Nextjs.md` | Neon 연결, Server Component 데이터 페칭 패턴 |
 | UC-07~09 콘텐츠 생성 | `docs/tech/gemini_tech.md`, `docs/tech/neon.md` | Gemini 스트리밍 API, 생성 결과 DB 저장 |
 | UC-10~14 지침 관리 | `docs/tech/neon.md`, `docs/framework/Nextjs.md` | CRUD API(Hono), Neon ORM 패턴 |
+| UC-15~19 콘텐츠 이력 **(P2)** | `docs/tech/neon.md` | `content_versions` 스키마, 복원 트랜잭션(BR-19), 100KB 제한(BR-20) |
+| UC-20~22 다국어 번역 **(P2)** | `docs/tech/gemini_tech.md`, `docs/tech/neon.md` | Gemini 번역 프롬프트, 마크다운 구조 보존, `content_translations` UNIQUE 제약 |
 
 ---
 
@@ -278,3 +317,8 @@ API 응답 500 감지
 - [x] 특정 기능에만 해당하는 내용이 포함되지 않았는가? (SSOT 준수)
   - AI Rate Limit 토스트 → 04-usecase-콘텐츠생성 참조 표기
   - 지침 삭제 모달 본문 → 05-usecase-지침관리 참조 표기
+  - 버전 복원·번역 모달 본문 → 06/07-usecase 참조 표기 **(P2)**
+- [x] **(P2)** UC-15~22가 모두 UC-00 목록에 등록되어 있는가?
+- [x] **(P2)** BR-18~24가 정의되어 있고 각 UC가 참조 가능한가?
+- [x] **(P2)** 번역 quota 메시지·LocalStorage 키가 BR-21에 단일 정의되었는가? (TRD·IA·usecase 중복 금지)
+- [x] **(P2)** 지원 언어가 한국어(`ko`)·영어(`en`) 두 가지로 BR-22에 명시되었는가?
