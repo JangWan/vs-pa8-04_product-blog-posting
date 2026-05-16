@@ -1,221 +1,271 @@
 ---
 description: Clerk Authentication & User Management Guideline
-globs: "**/*clerk*,**/middleware.ts,**/sign-in/**,**/sign-up/**"
+globs: "**/*clerk*,**/proxy.ts,**/sign-in/**,**/sign-up/**"
 ---
 
 # Clerk Authentication & User Management Guideline
 
-> 기준: 2026년 5월 / Clerk v6+ / Next.js App Router
+> **기준: 2026년 5월 / @clerk/nextjs v7+ (Core 3) / Next.js 16 App Router**
+>
+> ⚠️ **Core 2 (v6 이하) 코드와 완전히 다릅니다. 반드시 Core 3 문서만 참조하세요.**
 
-## Must
+---
+
+## Core 3 핵심 변경사항
+
+| 항목 | Core 2 (❌ 사용 금지) | Core 3 (✅ 현재) |
+|------|----------------------|-----------------|
+| `useSignIn()` 반환값 | `{ isLoaded, signIn, setActive }` | `{ signIn, errors, fetchStatus }` |
+| `useSignUp()` 반환값 | `{ isLoaded, signUp, setActive }` | `{ signUp, errors, fetchStatus }` |
+| 이메일+비번 로그인 | `signIn.create({ identifier, password })` | `signIn.password({ identifier, password })` |
+| 이메일+비번 회원가입 | `signUp.create({ emailAddress, password })` | `signUp.password({ emailAddress, password })` |
+| 이메일 인증 발송 | `signUp.prepareEmailAddressVerification()` | `signUp.verifications.sendEmailCode()` |
+| 이메일 인증 확인 | `signUp.attemptEmailAddressVerification()` | `signUp.verifications.verifyEmailCode()` |
+| 세션 활성화 | `setActive({ session: result.createdSessionId })` | `signIn.finalize({ navigate })` |
+| 로딩 상태 | `isLoaded` | `fetchStatus === 'fetching'` |
+| 비밀번호 재설정 | `signIn.create({ strategy: 'reset_password_email_code' })` | `signIn.resetPasswordEmailCode.sendCode()` |
+| 조건부 렌더링 | `<SignedIn>`, `<SignedOut>` | `<Show when="signed-in">`, `<Show when="signed-out">` |
+
+---
+
+## Must (반드시 지켜야 할 규칙)
 
 - `CLERK_SECRET_KEY`는 **절대 클라이언트에 노출 금지** — 서버(Server Component, API Route, Server Action)에서만 사용
-- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`는 `NEXT_PUBLIC_` 접두사 필수 (클라이언트에서 Clerk 초기화에 필요)
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`는 `NEXT_PUBLIC_` 접두사 필수
 - 미들웨어는 반드시 `clerkMiddleware` + `createRouteMatcher` 조합으로 작성
-- 클라이언트 컴포넌트에서 `useUser()`, `useAuth()` 사용 시 `isLoaded` 상태 반드시 확인
-- `currentUser()`는 Backend API를 호출하므로 꼭 필요한 경우에만 사용 (rate limit 소비)
-- 서버사이드에서 `userId` 확인만 필요하면 `currentUser()` 대신 `auth()` 사용
-- `auth().protect()`는 미인증 시 자동으로 로그인 페이지로 리다이렉트
-- `privateMetadata`는 클라이언트에 절대 전달 금지 (서버에서만 접근)
+- `useUser()`, `useAuth()`는 `isLoaded` 상태 반드시 확인 (이 훅들은 Core 3에서도 `isLoaded` 반환)
+- `useSignIn()`, `useSignUp()`은 `isLoaded` 없음 — `fetchStatus`로 로딩 판별
+- `privateMetadata`는 클라이언트에 절대 전달 금지
+- 커스텀 회원가입 폼에는 `<div id="clerk-captcha" />` 필수 (아래 CAPTCHA 섹션 참조)
 
-## Should
-
-- 미들웨어에서 보호 경로를 명시적으로 선언 (`createRouteMatcher` 사용)
-- `publicMetadata`로 사용자 역할(role)을 관리하고 `privateMetadata`는 민감 정보에 사용
-- `<SignIn>`, `<SignUp>` 컴포넌트는 전용 페이지(`app/sign-in/[[...sign-in]]`)에 배치
-- `appearance` prop으로 Tailwind 클래스를 통해 브랜드 스타일 적용
-- Clerk 기본 하단 전환 링크(footer)는 `!hidden` 으로 숨기고 커스텀 UI로 대체
-- 온보딩 플로우가 있으면 `sessionClaims.metadata.onboardingComplete`로 분기
+---
 
 ## Environment Variables
 
 ```env
-# .env.local — Next.js 기준
+# .env.local
 
-# 필수 (클라이언트 공개)
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxxxxxxxxxxx
-
-# 필수 (서버 전용 — NEXT_PUBLIC_ 절대 금지)
 CLERK_SECRET_KEY=sk_test_xxxxxxxxxxxx
+CLERK_WEBHOOK_SECRET=whsec_xxxxxxxxxxxx
 
-# 라우트 경로 설정
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
-
-# 로그인/가입 후 폴백 리다이렉트 (redirect param 없을 때)
-NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/
-NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/
-
-# 온보딩 플로우가 있는 경우 (항상 강제 리다이렉트)
-# NEXT_PUBLIC_CLERK_SIGN_UP_FORCE_REDIRECT_URL=/onboarding
 ```
 
-## Middleware Setup
+---
+
+## Proxy Setup (Next.js 16+)
+
+> ⚠️ **Next.js 16부터 `middleware.ts` → `proxy.ts`로 변경됨**  
+> `middleware.ts`를 사용하면 `"middleware" file convention is deprecated` 오류 발생.  
+> `src/` 디렉토리 사용 시 반드시 `src/proxy.ts`에 위치해야 함.
 
 ```typescript
-// middleware.ts (프로젝트 루트)
+// src/proxy.ts (Next.js 16+ — src/ 사용 시 src/ 안에 위치)
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 
 const isPublicRoute = createRouteMatcher([
   '/',
   '/sign-in(.*)',
   '/sign-up(.*)',
-  '/api/webhooks(.*)', // Clerk webhook은 인증 없이 수신
+  '/api/webhooks(.*)',
 ])
 
-const isAdminRoute = createRouteMatcher(['/admin(.*)'])
-
 export default clerkMiddleware(async (auth, req) => {
-  // 공개 경로가 아니면 인증 필수
   if (!isPublicRoute(req)) {
     await auth.protect()
-  }
-
-  // 관리자 경로는 역할/권한 추가 검증
-  if (isAdminRoute(req)) {
-    await auth.protect((has) =>
-      has({ role: 'org:admin' }) || has({ permission: 'org:admin:access' })
-    )
   }
 })
 
 export const config = {
   matcher: [
-    // Next.js 내부 파일 및 정적 파일 제외
     '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // API / tRPC 항상 실행
     '/(api|trpc)(.*)',
-    // Clerk 프론트엔드 API 항상 실행
     '/__clerk/(.*)',
   ],
 }
 ```
 
-## Page Routes
+---
 
-```
-app/
-├── sign-in/
-│   └── [[...sign-in]]/
-│       └── page.tsx     ← <SignIn> 컴포넌트 배치
-└── sign-up/
-    └── [[...sign-up]]/
-        └── page.tsx     ← <SignUp> 컴포넌트 배치
-```
+## CAPTCHA (봇 방지) — 커스텀 플로우 필수
 
-## Appearance Customization
-
-Tailwind 프로젝트에서 `appearance` prop으로 브랜드 스타일을 적용합니다.
-`elements` 값에 Tailwind 클래스를 직접 입력 (`cl-` prefix 없이 사용).
-`!hidden`으로 기본 Clerk UI 요소를 강제로 숨길 수 있습니다.
-
-```typescript
-// lib/clerk-appearance.ts — 전역 공유 appearance 객체
-export const clerkAppearance = {
-  variables: {
-    colorPrimary: "#18181b",   // zinc-900
-    borderRadius: "0.5rem",
-  },
-  elements: {
-    rootBox: "mx-auto w-full",
-    card: "shadow-none border-none bg-white",
-    headerTitle: "text-zinc-950 font-semibold text-xl",
-    headerSubtitle: "text-zinc-500 text-sm mt-2",
-    formFieldInput:
-      "border-zinc-200 focus:border-zinc-400 focus:ring-zinc-400",
-    buttonPrimary: "bg-zinc-900 hover:bg-zinc-800 text-white shadow-none",
-    dividerLine: "bg-zinc-200",
-    dividerText: "text-zinc-400",
-
-    // Clerk 기본 하단 전환 링크 완전히 숨김
-    // ("Don't have an account?", "Sign up" 링크, "Secured by Clerk" 문구)
-    footerAction: "!hidden",      // 링크 컨테이너 숨김
-    footerActionText: "!hidden",  // 전환 텍스트 숨김
-    footerActionLink: "!hidden",  // 전환 링크 숨김
-    footer: "!hidden",            // "Secured by Clerk" 문구 숨김
-  },
-} satisfies Parameters<typeof import('@clerk/nextjs').SignIn>[0]['appearance']
-```
+커스텀 회원가입 플로우에서는 `signUp.password()` 호출 전에 CAPTCHA 위젯이 DOM에 마운트되어야 합니다.  
+`<div id="clerk-captcha" />`가 없으면 콘솔 에러 발생 + Invisible CAPTCHA 폴백으로 불안정하게 동작합니다.
 
 ```tsx
-// app/sign-in/[[...sign-in]]/page.tsx
-import { SignIn } from '@clerk/nextjs'
-import { clerkAppearance } from '@/lib/clerk-appearance'
+<form onSubmit={handleRegister}>
+  {/* ... 입력 필드 ... */}
+
+  {/* ✅ 반드시 폼 안 버튼 아래에 위치 */}
+  <button type="submit">회원가입</button>
+  <div id="clerk-captcha" />
+</form>
+```
+
+> ⚠️ 로그인 폼(`sign-in`)에는 불필요 — 회원가입 폼에만 필요합니다.
+
+---
+
+## Client-Side Hooks
+
+### 훅 한눈에 보기
+
+| 훅 | 반환값 핵심 | `isLoaded` 있음? |
+|---|---|---|
+| `useUser()` | `isLoaded`, `isSignedIn`, `user` | ✅ |
+| `useAuth()` | `isLoaded`, `userId`, `orgId`, `isSignedIn`, `getToken` | ✅ |
+| `useClerk()` | `signOut`, `openSignIn`, `setActive`, `client` | — |
+| `useSession()` | `isLoaded`, `isSignedIn`, `session` | ✅ |
+| `useSessionList()` | `isLoaded`, `sessions`, `setActive` | ✅ |
+| `useSignIn()` | `signIn`, `errors`, `fetchStatus` | ❌ (`fetchStatus` 사용) |
+| `useSignUp()` | `signUp`, `errors`, `fetchStatus` | ❌ (`fetchStatus` 사용) |
+
+---
+
+### useSignIn() — 커스텀 로그인 (Core 3)
+
+```tsx
+'use client'
+import { useSignIn, useAuth } from '@clerk/nextjs'
+import { useRouter } from 'next/navigation'
+import { useEffect } from 'react'
 
 export default function SignInPage() {
+  const { signIn, errors, fetchStatus } = useSignIn()
+  const { isLoaded, isSignedIn } = useAuth()
+  const router = useRouter()
+
+  // ✅ 이미 로그인된 경우 대시보드로 이동
+  useEffect(() => {
+    if (isLoaded && isSignedIn) router.replace('/dashboard')
+  }, [isLoaded, isSignedIn, router])
+
+  const isLoading = fetchStatus === 'fetching'
+
+  async function handleLogin(email: string, password: string) {
+    const { error } = await signIn.password({ identifier: email, password })
+
+    if (error) {
+      // 이미 로그인된 세션 — 대시보드로 이동
+      if (error.code === 'session_exists' || error.code === 'identifier_already_signed_in') {
+        router.replace('/dashboard')
+        return
+      }
+      // 보안상 이메일/비번 오류는 통합 메시지 사용
+      console.error(error.code, error.message)
+      return
+    }
+
+    if (signIn.status === 'complete') {
+      await signIn.finalize({
+        navigate: ({ decorateUrl }) => {
+          const url = decorateUrl('/dashboard')
+          if (url.startsWith('http')) window.location.href = url
+          else router.push(url)
+        },
+      })
+    }
+  }
+
+  // 에러 접근법
+  // errors?.fields?.identifier?.message  — 이메일 필드 에러
+  // errors?.fields?.password?.message    — 비밀번호 필드 에러
+  // errors?.global?.[0]?.message         — 전역 에러
+}
+```
+
+---
+
+### 비밀번호 재설정 (Core 3) — 비인증 사용자
+
+> ⚠️ `signIn.resetPasswordEmailCode.*`는 **로그인하지 않은 사용자(비밀번호 찾기)**에만 사용.  
+> 이미 로그인된 사용자의 비밀번호 변경은 `user.updatePassword()` 사용 (아래 참조).
+
+```typescript
+// 필수: sendCode() 전에 반드시 signIn.create()로 계정 특정 먼저
+const { error: createError } = await signIn.create({ identifier: email })
+
+// 1단계: 재설정 코드 발송
+const { error } = await signIn.resetPasswordEmailCode.sendCode()
+
+// 2단계: 코드 검증
+const { error } = await signIn.resetPasswordEmailCode.verifyCode({ code: '123456' })
+
+// 3단계: 새 비밀번호 설정
+const { error } = await signIn.resetPasswordEmailCode.submitPassword({
+  password: 'newSecurePassword123',
+})
+```
+
+---
+
+### useSignUp() — 커스텀 회원가입 (Core 3)
+
+```tsx
+'use client'
+import { useSignUp, useAuth } from '@clerk/nextjs'
+import { useRouter } from 'next/navigation'
+import { useEffect } from 'react'
+
+export default function SignUpPage() {
+  const { signUp, errors, fetchStatus } = useSignUp()
+  const { isLoaded, isSignedIn } = useAuth()
+  const router = useRouter()
+
+  // ✅ 이미 로그인된 경우 대시보드로 이동
+  useEffect(() => {
+    if (isLoaded && isSignedIn) router.replace('/dashboard')
+  }, [isLoaded, isSignedIn, router])
+
+  const isLoading = fetchStatus === 'fetching'
+
+  async function handleRegister(email: string, password: string) {
+    // 1단계: 이메일+비번으로 계정 생성
+    const { error } = await signUp.password({ emailAddress: email, password })
+    if (error) return
+
+    // 2단계: 이메일 인증 코드 발송
+    await signUp.verifications.sendEmailCode()
+    // → OTP 입력 단계로 전환
+  }
+
+  async function handleVerify(code: string) {
+    // 3단계: OTP 코드 검증
+    const { error } = await signUp.verifications.verifyEmailCode({ code })
+    if (error) return
+
+    if (signUp.status === 'complete') {
+      await signUp.finalize({
+        navigate: ({ decorateUrl }) => {
+          const url = decorateUrl('/dashboard')
+          if (url.startsWith('http')) window.location.href = url
+          else router.push(url)
+        },
+      })
+    }
+  }
+
+  // 이메일 인증 재발송
+  async function handleResend() {
+    await signUp.verifications.sendEmailCode()
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <SignIn appearance={clerkAppearance} />
-      {/* 커스텀 전환 링크 */}
-      <p className="mt-4 text-sm text-zinc-500">
-        계정이 없으신가요?{' '}
-        <a href="/sign-up" className="text-zinc-900 font-medium hover:underline">
-          회원가입
-        </a>
-      </p>
-    </div>
+    <form onSubmit={handleRegister}>
+      {/* ... 입력 필드 ... */}
+      <button type="submit">회원가입</button>
+      {/* ✅ 필수: CAPTCHA 위젯 마운트 포인트 */}
+      <div id="clerk-captcha" />
+    </form>
   )
 }
 ```
 
-## Server-Side Auth
-
-```typescript
-// Server Component
-import { auth, currentUser } from '@clerk/nextjs/server'
-
-export default async function DashboardPage() {
-  // userId 확인만 필요할 때 — API 호출 없음
-  const { userId, orgId, sessionClaims, getToken } = await auth()
-  if (!userId) return null
-
-  // 전체 User 객체가 필요할 때만 currentUser() 사용
-  const user = await currentUser()
-
-  // JWT 토큰 (외부 API 인증용)
-  const token = await getToken()
-  // JWT Template 사용 시
-  const supabaseToken = await getToken({ template: 'supabase' })
-
-  return <div>Hello, {user?.firstName}</div>
-}
-
-// Route Handler
-import { auth } from '@clerk/nextjs/server'
-import { NextResponse } from 'next/server'
-
-export async function GET() {
-  const { userId, isAuthenticated } = await auth()
-
-  if (!isAuthenticated) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  return NextResponse.json({ userId })
-}
-```
-
-## Client-Side Hooks
-
-모든 클라이언트 훅은 `'use client'` 컴포넌트에서만 사용합니다. `isLoaded`가 `false`인 초기 상태를 반드시 처리해야 합니다.
-
-### 훅 한눈에 보기
-
-| 훅 | 반환값 핵심 | 주 용도 |
-|---|---|---|
-| `useUser()` | `isLoaded`, `isSignedIn`, `user` | 사용자 프로필 읽기/수정 |
-| `useAuth()` | `userId`, `orgId`, `isSignedIn`, `getToken` | 세션 토큰·조직 ID 접근 |
-| `useClerk()` | `clerk`, `signOut`, `openSignIn`, `setActive` | 프로그래매틱 인증 제어 |
-| `useSession()` | `isLoaded`, `isSignedIn`, `session` | 현재 세션 객체 접근 |
-| `useSessionList()` | `isLoaded`, `sessions`, `setActive` | 멀티세션 목록 관리 |
-| `useOrganization()` | `organization`, `memberships`, `isLoaded` | 현재 조직 정보 |
-| `useOrganizationList()` | `userMemberships`, `setActive`, `createOrganization` | 전체 조직 목록 |
-| `useSignIn()` | `signIn`, `errors`, `fetchStatus` | 커스텀 로그인 플로우 |
-| `useSignUp()` | `signUp`, `errors`, `fetchStatus` | 커스텀 회원가입 플로우 |
-
 ---
 
-### useUser() — 사용자 정보
+### useUser() — 사용자 정보 & 아바타
 
 ```tsx
 'use client'
@@ -224,392 +274,373 @@ import { useUser } from '@clerk/nextjs'
 export function UserProfile() {
   const { isLoaded, isSignedIn, user } = useUser()
 
-  if (!isLoaded) return <div>Loading...</div>  // 반드시 isLoaded 확인
+  if (!isLoaded) return <div>Loading...</div>
   if (!isSignedIn) return null
 
-  return (
-    <div>
-      <p>Hello, {user.firstName}!</p>
-      <p>Email: {user.emailAddresses[0].emailAddress}</p>
-      <p>Role: {user.publicMetadata.role as string}</p>
-    </div>
-  )
+  return <p>{user.emailAddresses[0].emailAddress}</p>
 }
 
-// 사용자 정보 업데이트
-const updateUser = async () => {
-  await user.update({ firstName: 'John', lastName: 'Doe' })
-  await user.reload() // 메타데이터 변경 후 강제 갱신
+// ✅ 아바타 이미지 존재 여부 판별 — user.hasImage 사용
+// ❌ URL 문자열 검사 금지 (img.clerk.com은 커스텀 이미지도 동일 도메인 사용)
+const hasCustomImage = user.hasImage  // ✅ Clerk 제공 boolean
+
+// 아바타 업로드
+await user.setProfileImage({ file })
+await user.reload()  // 업로드 후 반드시 reload()로 user 객체 갱신
+setPreview(null)     // 업로드 성공 후 preview 초기화 → user.imageUrl 직접 표시
+
+// 이름 수정
+await user.update({ firstName: 'John', lastName: 'Doe' })
+
+// 계정 삭제
+await user.delete()
+```
+
+---
+
+### 비밀번호 변경 — 인증된 사용자 (Core 3)
+
+> ✅ 이미 로그인된 사용자가 비밀번호를 변경할 때는 `user.updatePassword()` 사용.  
+> ❌ `signIn.resetPasswordEmailCode.*`는 비인증 사용자 전용 — 인증된 사용자에게 사용하면 session touch만 발생.
+
+```typescript
+// 현재 비밀번호 + 새 비밀번호로 직접 변경
+try {
+  await user.updatePassword({
+    currentPassword: 'oldPassword',
+    newPassword: 'newPassword123',
+  })
+  // 보안상 비밀번호 변경 후 로그아웃 권장
+  await signOut()
+  router.replace('/')
+} catch (err) {
+  // user.updatePassword()는 { error } 반환이 아닌 throw 방식
+  const code = (err as { errors?: { code: string }[] })?.errors?.[0]?.code
+  console.error(code)
 }
 ```
 
 ---
 
-### useAuth() — 세션 / 토큰 / 조직
+### 세션 목록 (활성 세션 + latestActivity)
+
+> ✅ 세션 activity 정보(browser, OS, IP)가 필요하면 `user.getSessions()` 사용.  
+> ❌ `useSessionList()`는 `SessionResource[]`를 반환하며 `latestActivity`가 없음.
+
+```typescript
+// ✅ user.getSessions() — SessionWithActivitiesResource[] 반환
+const [sessions, setSessions] = useState([])
+
+useEffect(() => {
+  if (!user) return
+  user.getSessions().then(setSessions).catch(() => setSessions([]))
+}, [user])
+
+// 각 세션에서 접근 가능한 activity 필드
+session.latestActivity?.browserName  // "Chrome"
+session.latestActivity?.osName       // "Windows"
+session.latestActivity?.ipAddress    // "1.2.3.4"
+session.latestActivity?.isMobile     // false
+// ⚠️ city/country는 Clerk 유료 플랜 또는 IP 지오로케이션 가용성에 따라 null일 수 있음
+
+// 세션 원격 종료
+await session.revoke()
+
+// ⚠️ SessionWithActivitiesResource는 @clerk/nextjs에서 export되지 않음 — 인라인 타입 직접 정의
+type SessionWithActivity = {
+  id: string
+  revoke: () => Promise<unknown>
+  latestActivity?: {
+    ipAddress?: string | null
+    browserName?: string | null
+    osName?: string | null
+    isMobile?: boolean
+  } | null
+}
+```
+
+---
+
+### 현재 접속 기기 정보 (useSessionInfo + API Route)
+
+현재 요청의 IP를 서버에서 읽어 클라이언트에 반환하는 패턴. UA 파싱은 클라이언트에서 수행한다.
+
+```typescript
+// src/app/api/user/session-info/route.ts
+// ⚠️ proxy.ts의 public 경로에 포함하지 말 것 (인증 필요 엔드포인트)
+export async function GET(req: Request) {
+  const ip =
+    req.headers.get('cf-connecting-ip') ??
+    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    req.headers.get('x-real-ip') ??
+    null
+  return Response.json({ ip })
+}
+```
+
+```typescript
+// src/features/user-profile/hooks/use-session-info.ts
+import { useQuery } from '@tanstack/react-query'
+
+function parseDeviceInfo(ua: string) {
+  const os =
+    /Windows/.test(ua) ? 'Windows' :
+    /Mac OS X/.test(ua) ? 'macOS' :
+    /iPhone|iPad/.test(ua) ? 'iOS' :
+    /Android/.test(ua) ? 'Android' :
+    /Linux/.test(ua) ? 'Linux' : '알 수 없는 OS'
+
+  const browser =
+    /Edg\//.test(ua) ? 'Edge' :
+    /OPR\//.test(ua) ? 'Opera' :
+    /Chrome\//.test(ua) ? 'Chrome' :
+    /Firefox\//.test(ua) ? 'Firefox' :
+    /Safari\//.test(ua) ? 'Safari' : '알 수 없는 브라우저'
+
+  return { os, browser }
+}
+
+export function useSessionInfo() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['session-info'],
+    queryFn: () => fetch('/api/user/session-info').then((r) => r.json()),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+  const { os, browser } = parseDeviceInfo(ua)
+
+  return { ip: data?.ip ?? null, os, browser, isLoading }
+}
+```
+
+---
+
+### 계정 관리 UI 구현 — 핵심 패턴 요약
+
+아바타 드롭다운 → 계정 관리 모달(shadcn Dialog) → 좌우 분할(사이드바 탭 + 콘텐츠) 구조.
+
+```typescript
+// 아바타 업로드 — preview 초기화 패턴
+const objectUrl = URL.createObjectURL(file)
+setPreview(objectUrl)            // 즉시 미리보기
+await user.setProfileImage({ file })
+await user.reload()
+setPreview(null)                 // ✅ 성공 후 반드시 해제 — 없으면 구 미리보기 표시 지속
+
+// 비밀번호 변경 — 확인 패널 → 실행 패턴
+// 1. 폼 제출 → pendingPwData에 저장 (실행 안 함)
+// 2. 확인 패널 표시 (경고 메시지 + 변경/취소 버튼)
+// 3. 사용자 확정 → executePwChange() 실행
+async function executePwChange() {
+  await user.updatePassword({ currentPassword, newPassword })
+  await signOut()                // 변경 후 세션 무효화 → 로그아웃 필수
+  router.replace('/')
+}
+
+// 계정 삭제 — 입력 확인 패턴
+// deleteConfirm === "계정삭제" 일치 시에만 버튼 활성화
+await user.delete()
+await signOut()
+router.replace('/')
+```
+
+---
+
+### useAuth() — 세션 / 토큰
 
 ```tsx
 'use client'
 import { useAuth } from '@clerk/nextjs'
 
 export function TokenFetcher() {
-  const { isLoaded, isSignedIn, userId, orgId, orgRole, getToken } = useAuth()
+  const { isLoaded, isSignedIn, userId, getToken } = useAuth()
 
-  const fetchProtectedData = async () => {
-    const token = await getToken()                        // 기본 세션 토큰
-    const supabaseToken = await getToken({ template: 'supabase' }) // JWT Template
-
+  const fetchData = async () => {
+    const token = await getToken()
     await fetch('/api/protected', {
       headers: { Authorization: `Bearer ${token}` },
     })
   }
 
   if (!isLoaded || !isSignedIn) return null
-  return (
-    <div>
-      <p>User: {userId}</p>
-      <p>Org: {orgId} / Role: {orgRole}</p>
-      <button onClick={fetchProtectedData}>Fetch Protected</button>
-    </div>
-  )
+  return <button onClick={fetchData}>Fetch</button>
 }
 ```
 
 ---
 
-### useClerk() — 프로그래매틱 인증 제어
+### useClerk() — 로그아웃 / 세션 제어
 
 ```tsx
 'use client'
 import { useClerk } from '@clerk/nextjs'
 import { useRouter } from 'next/navigation'
 
-export function AuthControls() {
-  const { signOut, openSignIn, openSignUp, setActive, client } = useClerk()
+export function SignOutButton() {
+  const { signOut } = useClerk()
   const router = useRouter()
 
   return (
-    <div>
-      {/* 모달로 로그인창 열기 */}
-      <button onClick={() => openSignIn({})}>로그인</button>
-      <button onClick={() => openSignUp({})}>회원가입</button>
-
-      {/* 전체 세션 로그아웃 후 홈으로 이동 */}
-      <button onClick={() => signOut(() => router.push('/'))}>로그아웃</button>
-
-      {/* 특정 세션만 로그아웃 (멀티세션) */}
-      <button onClick={() => signOut(client.activeSessions[0].id)}>
-        이 세션만 로그아웃
-      </button>
-    </div>
+    <button onClick={async () => { await signOut(); router.replace('/') }}>
+      로그아웃
+    </button>
   )
 }
 ```
 
 ---
 
-### useSession() / useSessionList() — 세션 관리
+## 에러 메시지 한글화
 
-```tsx
-'use client'
-import { useSession, useSessionList } from '@clerk/nextjs'
-
-// 현재 세션 단건
-export function SessionInfo() {
-  const { isLoaded, session } = useSession()
-  if (!isLoaded || !session) return null
-  return <p>Session ID: {session.id} / Expires: {session.expireAt.toLocaleDateString()}</p>
-}
-
-// 멀티세션 목록 (여러 계정 전환)
-export function SessionSwitcher() {
-  const { isLoaded, sessions, setActive } = useSessionList()
-  if (!isLoaded) return null
-
-  return (
-    <ul>
-      {sessions.map((s) => (
-        <li key={s.id}>
-          {s.user?.emailAddresses[0].emailAddress}
-          <button onClick={() => setActive({ session: s.id })}>전환</button>
-        </li>
-      ))}
-    </ul>
-  )
-}
-```
-
----
-
-### useOrganization() — 현재 조직
-
-```tsx
-'use client'
-import { useOrganization } from '@clerk/nextjs'
-
-export function OrgDashboard() {
-  const { isLoaded, organization, memberships } = useOrganization({
-    memberships: { pageSize: 10, infinite: true }, // 필요한 경우에만 명시적 요청
-  })
-
-  if (!isLoaded) return <div>Loading...</div>
-  if (!organization) return <div>조직을 선택해주세요.</div>
-
-  return (
-    <div>
-      <h1>{organization.name}</h1>
-      <p>Members: {memberships?.count}</p>
-      <ul>
-        {memberships?.data?.map((mem) => (
-          <li key={mem.id}>
-            {mem.publicUserData?.identifier} — {mem.role}
-          </li>
-        ))}
-      </ul>
-      {memberships?.hasNextPage && (
-        <button onClick={memberships.fetchNext}>더 보기</button>
-      )}
-    </div>
-  )
-}
-```
-
----
-
-### useOrganizationList() — 조직 목록 전환
-
-```tsx
-'use client'
-import { useOrganizationList } from '@clerk/nextjs'
-
-export function OrgSwitcher() {
-  const { isLoaded, userMemberships, setActive, createOrganization } =
-    useOrganizationList({ userMemberships: { infinite: true } })
-
-  if (!isLoaded) return null
-
-  return (
-    <ul>
-      {userMemberships.data?.map((mem) => (
-        <li key={mem.id}>
-          {mem.organization.name}
-          <button onClick={() => setActive({ organization: mem.organization.id })}>
-            선택
-          </button>
-        </li>
-      ))}
-    </ul>
-  )
-}
-```
-
----
-
-### useSignIn() / useSignUp() — 커스텀 인증 플로우
-
-프리빌트 컴포넌트(`<SignIn>`, `<SignUp>`) 대신 완전히 커스텀 UI가 필요할 때 사용합니다.
-
-```tsx
-'use client'
-import { useSignIn } from '@clerk/nextjs'
-import { useRouter } from 'next/navigation'
-
-export function CustomSignInForm() {
-  const { signIn, errors, fetchStatus } = useSignIn()
-  const router = useRouter()
-
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-
-    // 1단계: 이메일 코드 전송
-    await signIn.create({ identifier: formData.get('email') as string })
-
-    const emailFactor = signIn.supportedFirstFactors?.find(
-      (f) => f.strategy === 'email_code'
-    )
-    if (emailFactor) {
-      await signIn.prepareFirstFactor({
-        strategy: 'email_code',
-        emailAddressId: (emailFactor as any).emailAddressId,
-      })
-    }
-  }
-
-  const handleVerify = async (code: string) => {
-    const result = await signIn.attemptFirstFactor({
-      strategy: 'email_code',
-      code,
-    })
-    if (result.status === 'complete') router.push('/dashboard')
-  }
-
-  return (
-    <form onSubmit={handleSubmit}>
-      {errors?.fields?.emailAddress && (
-        <p className="text-red-500">{errors.fields.emailAddress.message}</p>
-      )}
-      <input name="email" type="email" required />
-      <button type="submit" disabled={fetchStatus === 'fetching'}>
-        인증 코드 전송
-      </button>
-    </form>
-  )
-}
-```
-
-## 조건부 렌더링 컴포넌트
-
-`<SignedIn>` / `<SignedOut>` 대신 Clerk v6+에서는 `<Show>` 컴포넌트를 사용합니다.
-
-```tsx
-'use client'
-import { Show, UserButton, SignInButton } from '@clerk/nextjs'
-
-export function Header() {
-  return (
-    <header className="flex items-center justify-between p-4">
-      <Logo />
-      <div className="flex items-center gap-4">
-        {/* 로그인 상태에 따라 조건부 렌더 */}
-        <Show when="signed-out">
-          <SignInButton mode="modal">
-            <button className="btn-primary">로그인</button>
-          </SignInButton>
-        </Show>
-        <Show when="signed-in">
-          {/* 프로필 드롭다운 (아바타 + 설정 + 로그아웃) */}
-          <UserButton afterSignOutUrl="/" />
-        </Show>
-      </div>
-    </header>
-  )
-}
-```
-
-## Clerk Elements (헤드리스 커스텀 플로우)
-
-`<SignIn>` / `<SignUp>` 프리빌트 컴포넌트 대신 완전한 커스텀 UI가 필요할 때 사용합니다.
-`@clerk/elements/sign-in`, `@clerk/elements/sign-up`, `@clerk/elements/common`으로 구성됩니다.
-
-```tsx
-// app/sign-in/[[...sign-in]]/page.tsx
-'use client'
-
-import * as Clerk from '@clerk/elements/common'
-import * as SignIn from '@clerk/elements/sign-in'
-
-export default function SignInPage() {
-  return (
-    <SignIn.Root>
-      {/* start: 이메일/소셜 입력 단계 */}
-      <SignIn.Step name="start" className="space-y-4 rounded-2xl bg-white p-8 shadow-sm">
-        {/* 소셜 로그인 */}
-        <Clerk.Connection name="google" className="btn-social">
-          <Clerk.Icon />
-          Google로 로그인
-        </Clerk.Connection>
-
-        {/* 이메일 입력 */}
-        <Clerk.Field name="identifier">
-          <Clerk.Label className="text-sm font-medium">이메일</Clerk.Label>
-          <Clerk.Input type="email" required className="input" />
-          <Clerk.FieldError className="text-sm text-red-500" />
-        </Clerk.Field>
-
-        <Clerk.GlobalError className="text-sm text-red-500" />
-        <SignIn.Action submit className="btn-primary w-full">계속</SignIn.Action>
-      </SignIn.Step>
-
-      {/* verifications: 코드 검증 단계 */}
-      <SignIn.Step name="verifications">
-        <SignIn.Strategy name="email_code">
-          <Clerk.Field name="code">
-            <Clerk.Label className="text-sm font-medium">인증 코드</Clerk.Label>
-            <Clerk.Input type="otp" className="input" />
-            <Clerk.FieldError className="text-sm text-red-500" />
-          </Clerk.Field>
-          <SignIn.Action submit className="btn-primary w-full">인증</SignIn.Action>
-          <SignIn.Action resend className="text-sm text-zinc-500">
-            코드 재전송
-          </SignIn.Action>
-        </SignIn.Strategy>
-      </SignIn.Step>
-
-      {/* 비밀번호 재설정 단계 */}
-      <SignIn.Step name="forgot-password" />
-      <SignIn.Step name="reset-password" />
-    </SignIn.Root>
-  )
-}
-```
-
-> **선택 기준**: `appearance` prop 커스터마이징으로 충분하면 `<SignIn>` 프리빌트 사용. 레이아웃/애니메이션까지 완전히 제어해야 하면 Clerk Elements 사용.
-
-## User Metadata
-
-| 타입 | 접근 | 용도 |
-|---|---|---|
-| `publicMetadata` | 서버 + 클라이언트 | 사용자 역할(role), 플랜 구분 |
-| `privateMetadata` | **서버 전용** | 결제 정보, 내부 식별자 등 민감 데이터 |
-| `unsafeMetadata` | 클라이언트 읽기/쓰기 | 비민감 UI 설정 (사용 최소화) |
+> Clerk 백엔드 API는 `error.message`를 항상 영어로 반환합니다.  
+> `ClerkProvider localization` prop은 프리빌트 컴포넌트에만 적용 — 커스텀 플로우 훅에는 효과 없음.  
+> ✅ **유일한 방법**: `error.code`를 기준으로 한글 메시지 매핑.
 
 ```typescript
-// Server Action — publicMetadata 업데이트 (clerkClient 사용)
-import { clerkClient } from '@clerk/nextjs/server'
+// src/lib/clerk-errors.ts
+const CLERK_ERROR_MAP: Record<string, string> = {
+  form_identifier_not_found:        '등록되지 않은 이메일입니다.',
+  form_password_incorrect:          '비밀번호가 올바르지 않습니다.',
+  session_exists:                   '이미 로그인된 상태입니다.',
+  identifier_already_signed_in:     '이미 로그인된 상태입니다.',
+  form_identifier_exists:           '이미 사용 중인 이메일입니다.',
+  form_password_length_too_short:   '비밀번호는 8자 이상이어야 합니다.',
+  form_password_pwned:              '유출된 비밀번호입니다. 다른 비밀번호를 사용해주세요.',
+  form_password_not_strong_enough:  '비밀번호가 너무 단순합니다.',
+  form_code_incorrect:              '인증 코드가 올바르지 않습니다.',
+  verification_failed:              '인증에 실패했습니다.',
+  verification_expired:             '인증 코드가 만료되었습니다. 다시 받아주세요.',
+  too_many_requests:                '시도 횟수를 초과했습니다. 잠시 후 다시 시도해주세요.',
+  password_incorrect:               '현재 비밀번호가 올바르지 않습니다.',
+}
 
-export async function setUserRole(userId: string, role: string) {
-  const client = await clerkClient()
-  await client.users.updateUserMetadata(userId, {
-    publicMetadata: { role },
-  })
+export function clerkErrorToKorean(code: string, fallback = '오류가 발생했습니다. 다시 시도해주세요.'): string {
+  return CLERK_ERROR_MAP[code] ?? fallback
+}
+
+// 사용법
+// { error } 반환 패턴 (signIn.password, signUp.verifications.* 등)
+const { error } = await signIn.password({ identifier: email, password })
+if (error) setMessage(clerkErrorToKorean(error.code))
+
+// throw 패턴 (user.updatePassword, user.delete 등)
+try {
+  await user.updatePassword({ currentPassword, newPassword })
+} catch (err) {
+  const code = (err as { errors?: { code: string }[] })?.errors?.[0]?.code
+  setMessage(code ? clerkErrorToKorean(code) : '오류가 발생했습니다.')
 }
 ```
 
-## Recommended Patterns
+---
 
-- **온보딩 리다이렉트**: `sessionClaims?.metadata?.onboardingComplete` 가 false면 `/onboarding`으로 리다이렉트
-- **역할 기반 접근**: `auth.protect({ role: 'org:admin' })` 또는 `has({ permission: '...' })`
-- **Webhook 수신**: `/api/webhooks/clerk` 경로를 미들웨어 public 경로에 추가 + `svix` 서명 검증
-- **`<ClerkProvider>`**: `app/layout.tsx` 최상단에 배치, `appearance` prop으로 전역 스타일 적용
-- `appearance`를 공유 상수(`lib/clerk-appearance.ts`)로 분리해 `<SignIn>`, `<SignUp>`, `<ClerkProvider>` 모두 동일하게 적용
+## Server-Side Auth
 
-## Security Best Practices
+```typescript
+// Server Component / Route Handler
+import { auth, currentUser } from '@clerk/nextjs/server'
 
-- `CLERK_SECRET_KEY`는 서버에서만 사용, 로그 출력 금지
-- Webhook 수신 엔드포인트는 반드시 `svix` 서명 검증 (`@clerk/nextjs`의 `verifyWebhook` 또는 `svix` 패키지)
-- `privateMetadata`는 API Route / Server Action에서만 접근
-- 미들웨어 `matcher`에서 `_next`, 정적 파일, `__clerk` 경로를 올바르게 설정
-- 세션 토큰(`getToken()`) 만료 처리 — 클라이언트에서 주기적으로 갱신
+// userId만 필요할 때 (API 호출 없음 — 권장)
+const { userId } = await auth()
+if (!userId) return null
+
+// 전체 User 객체가 필요할 때만 (Backend API 호출 소비)
+const user = await currentUser()
+
+// JWT 토큰
+const token = await getToken()
+```
+
+---
+
+## 조건부 렌더링
+
+```tsx
+import { Show } from '@clerk/nextjs'
+
+// ❌ Core 2: <SignedIn>, <SignedOut> 사용 금지
+// ✅ Core 3: <Show when="..."> 사용
+<Show when="signed-out">
+  <Link href="/sign-in">로그인</Link>
+</Show>
+<Show when="signed-in">
+  <UserDropdown />
+</Show>
+```
+
+---
+
+## Clerk Webhook
+
+```typescript
+// src/app/api/webhooks/clerk/route.ts
+import { Webhook } from 'svix'
+import { headers } from 'next/headers'
+
+export async function POST(req: Request) {
+  const body = await req.text()
+  const headersList = await headers()
+
+  const wh = new Webhook(process.env.CLERK_WEBHOOK_SECRET!)
+  const evt = wh.verify(body, {
+    'svix-id': headersList.get('svix-id')!,
+    'svix-timestamp': headersList.get('svix-timestamp')!,
+    'svix-signature': headersList.get('svix-signature')!,
+  }) as { type: string; data: Record<string, unknown> }
+
+  if (evt.type === 'user.created') {
+    // DB에 사용자 INSERT
+  }
+
+  return Response.json({ ok: true })
+}
+```
+
+---
+
+## 자주 하는 실수 체크리스트
+
+- [ ] Next.js 16+: `middleware.ts` → `proxy.ts`로 이름 변경 필수 (src 사용 시 `src/proxy.ts`)
+- [ ] `useSignIn()` / `useSignUp()`에서 `isLoaded`, `setActive` 구조분해 금지
+- [ ] 세션 활성화는 `setActive()` 아닌 `signIn.finalize()` / `signUp.finalize()`
+- [ ] 이메일 인증은 `prepareEmailAddressVerification` → `verifications.sendEmailCode()`
+- [ ] 비밀번호 재설정 strategy 문자열 사용 금지 → `resetPasswordEmailCode` 네임스페이스
+- [ ] **커스텀 회원가입 폼에 `<div id="clerk-captcha" />` 누락 금지** (봇 방지 필수)
+- [ ] 비밀번호 재설정 시 `sendCode()` 전에 `signIn.create({ identifier })` 먼저 호출
+- [ ] 인증된 사용자 비밀번호 변경: `signIn.resetPasswordEmailCode.*` ❌ → `user.updatePassword()` ✅
+- [ ] 아바타 존재 여부: URL 문자열 검사 ❌ → `user.hasImage` ✅
+- [ ] 세션 activity 정보: `useSessionList()` ❌ → `user.getSessions()` ✅
+- [ ] 에러 메시지: `error.message` 직접 표시 ❌ → `clerkErrorToKorean(error.code)` ✅
+- [ ] sign-in / sign-up 페이지: 이미 로그인된 경우 대시보드 리다이렉트 처리 필수
+- [ ] Clerk quickstart 실행 시 자동 생성되는 샘플 파일 즉시 삭제
+- [ ] `@clerk/ui`, `next-themes`는 커스텀 UI 구현 시 불필요 — 설치하지 말 것
 
 ---
 
 ## References
 
 | 문서 | URL |
-|---|---|
+|------|-----|
 | 공식 문서 홈 | https://clerk.com/docs |
-| Next.js 퀵스타트 | https://clerk.com/docs/quickstarts/nextjs |
-| clerkMiddleware | https://clerk.com/docs/references/nextjs/clerk-middleware |
-| 환경변수 전체 목록 | https://clerk.com/docs/deployments/clerk-environment-variables |
-| Appearance 커스터마이징 | https://clerk.com/docs/customization/overview |
-| Appearance variables | https://clerk.com/docs/customization/variables |
-| Appearance elements | https://clerk.com/docs/customization/elements |
-| Clerk Elements (헤드리스) | https://clerk.com/docs/customization/elements/overview |
-| Clerk Elements 예시 | https://clerk.com/docs/customization/elements/examples/sign-in |
+| 커스텀 플로우 개요 (Core 3) | https://clerk.com/docs/guides/development/custom-flows/overview |
+| 이메일+비번 커스텀 로그인 | https://clerk.com/docs/guides/development/custom-flows/authentication/sign-in-or-up |
+| **봇 방지 / CAPTCHA (커스텀 플로우)** | https://clerk.com/docs/guides/development/custom-flows/authentication/bot-sign-up-protection |
+| 비밀번호 변경 (인증된 사용자) | https://clerk.com/docs/guides/development/custom-flows/account-updates/change-password |
+| 비밀번호 재설정 (비인증 사용자) | https://clerk.com/docs/guides/development/custom-flows/account-updates/forgot-password |
+| 에러 핸들링 (Core 3) | https://clerk.com/docs/nextjs/guides/development/custom-flows/error-handling |
+| Core 3 업그레이드 가이드 | https://clerk.com/docs/guides/development/upgrading/upgrade-guides/core-3 |
+| ClerkError 타입 | https://clerk.com/docs/reference/types/clerk-error |
+| useSignIn() 레퍼런스 | https://clerk.com/docs/references/react/use-sign-in |
+| useSignUp() 레퍼런스 | https://clerk.com/docs/references/react/use-sign-up |
 | useUser() | https://clerk.com/docs/hooks/use-user |
 | useAuth() | https://clerk.com/docs/hooks/use-auth |
 | useClerk() | https://clerk.com/docs/hooks/use-clerk |
-| useSession() | https://clerk.com/docs/hooks/use-session |
 | useSessionList() | https://clerk.com/docs/hooks/use-session-list |
-| useOrganization() | https://clerk.com/docs/hooks/use-organization |
-| useOrganizationList() | https://clerk.com/docs/hooks/use-organization-list |
-| useSignIn() | https://clerk.com/docs/hooks/use-sign-in |
-| useSignUp() | https://clerk.com/docs/hooks/use-sign-up |
+| SessionWithActivities | https://clerk.com/docs/references/javascript/session-with-activities |
 | Show 컴포넌트 | https://clerk.com/docs/components/control/show |
-| UserButton 컴포넌트 | https://clerk.com/docs/components/user/user-button |
 | auth() 서버 헬퍼 | https://clerk.com/docs/references/nextjs/auth |
-| currentUser() | https://clerk.com/docs/references/nextjs/current-user |
-| Metadata 가이드 | https://clerk.com/docs/users/metadata |
+| clerkMiddleware | https://clerk.com/docs/references/nextjs/clerk-middleware |
 | Webhook 설정 | https://clerk.com/docs/webhooks/overview |
-| 커스텀 인증 플로우 | https://clerk.com/docs/guides/development/custom-flows/authentication |
+| 환경변수 전체 목록 | https://clerk.com/docs/deployments/clerk-environment-variables |
 | Neon + Clerk 연동 | https://clerk.com/docs/integrations/databases/neon |

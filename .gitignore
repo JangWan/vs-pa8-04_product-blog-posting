@@ -54,3 +54,6 @@ repomix-output-*.md
 # Docs
 GEMINI.md
 AGENTS.md
+
+# 임시문서
+docs/prompt

@@ -10,6 +10,51 @@ globs: "src/**/*.ts,src/**/*.tsx,src/**/*.js,src/**/*.jsx"
 
 ---
 
+## 0. Next.js 16 주요 변경사항 (Breaking Changes)
+
+### `middleware.ts` → `proxy.ts` 파일 컨벤션 변경
+
+> **에러**: `The "middleware" file convention is deprecated. Please use "proxy" instead.`  
+> 참고: https://nextjs.org/docs/messages/middleware-to-proxy
+
+Next.js 16부터 엣지 요청 처리 파일의 이름이 변경되었습니다.
+
+| 구분 | Next.js 15 이하 | Next.js 16+ |
+|------|----------------|-------------|
+| 파일명 | `middleware.ts` | `proxy.ts` |
+| 위치 | `src/middleware.ts` (src 디렉토리 사용 시) | `src/proxy.ts` |
+| 내용 | 동일 — `clerkMiddleware`, `createRouteMatcher` 등 그대로 사용 |
+
+```typescript
+// src/proxy.ts (Next.js 16+)
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/api/webhooks(.*)",
+]);
+
+export default clerkMiddleware(async (auth, req) => {
+  if (!isPublicRoute(req)) {
+    await auth.protect();
+  }
+});
+
+export const config = {
+  matcher: [
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/(api|trpc)(.*)",
+    "/__clerk/(.*)",
+  ],
+};
+```
+
+> ⚠️ `middleware.ts`를 그대로 두면 경고가 아닌 **동작 오류**로 이어질 수 있습니다. 신규 프로젝트는 처음부터 `proxy.ts`를 사용하세요.
+
+---
+
 ## 1. 핵심 준수 사항 (Must)
 
 - **컴포넌트 원칙**: 모든 UI 컴포넌트는 기본적으로 클라이언트 컴포넌트(`"use client"`)로 유지합니다.
