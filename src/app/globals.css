@@ -140,6 +140,8 @@
 
   html {
     scroll-behavior: smooth;
+    /* [원칙 1] 스크롤바 영역 상시 확보 — 페이지/모달 전환 시 덜컥거림 방지 */
+    overflow-y: scroll;
     scrollbar-gutter: stable;
   }
 
@@ -148,6 +150,14 @@
     font-family: var(--font-inter), "Pretendard", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* [원칙 2] Radix UI가 모달/드롭다운 열릴 때 강제 주입하는 padding-right 무력화 */
+    padding-right: 0px !important;
+  }
+
+  /* [원칙 3] 스크롤 잠금 상태에서도 padding 주입 차단 */
+  body[data-scroll-locked] {
+    overflow: hidden !important;
+    padding-right: 0px !important;
   }
 }
 
