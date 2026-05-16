@@ -166,6 +166,10 @@ export default function SignInPage() {
           else router.push(url)
         },
       })
+    } else if (signIn.status === 'needs_second_factor') {
+      // ✅ 2차 인증 필요 — 이메일 OTP 발송 후 MFA 입력 단계로 전환
+      const { error: mfaErr } = await signIn.mfa.sendEmailCode()
+      if (!mfaErr) setStep('mfa')
     }
   }
 
@@ -174,6 +178,96 @@ export default function SignInPage() {
   // errors?.fields?.password?.message    — 비밀번호 필드 에러
   // errors?.global?.[0]?.message         — 전역 에러
 }
+```
+
+---
+
+### 2차 인증(MFA) — needs_second_factor (Core 3)
+
+> Clerk 대시보드에서 **Multi-factor authentication**을 활성화하면, 비밀번호 인증 성공 후
+> `signIn.status === 'needs_second_factor'`가 반환됩니다.
+> 이 케이스를 처리하지 않으면 로그인이 완료되지 않고 무한 대기 상태가 됩니다.
+
+#### 사용 API (Core 3)
+
+| 동작 | API |
+|------|-----|
+| 이메일 OTP 발송 | `signIn.mfa.sendEmailCode()` |
+| 이메일 OTP 검증 | `signIn.mfa.verifyEmailCode({ code })` |
+| SMS OTP 검증 | `signIn.mfa.verifyPhoneCode({ code })` |
+| TOTP 앱 검증 | `signIn.mfa.verifyTOTP({ code })` |
+| 백업 코드 검증 | `signIn.mfa.verifyBackupCode({ code })` |
+
+> ⚠️ 이 프로젝트는 **이메일+비밀번호 전용**이므로 `sendEmailCode` / `verifyEmailCode`만 사용합니다.
+
+```typescript
+// 1단계: signIn.password() 이후 status 분기
+if (signIn.status === 'complete') {
+  await signIn.finalize({ navigate: ... })
+} else if (signIn.status === 'needs_second_factor') {
+  // ✅ 이메일 OTP 발송
+  const { error } = await signIn.mfa.sendEmailCode()
+  if (!error) setStep('mfa')  // MFA 입력 화면으로 전환
+}
+
+// 2단계: OTP 코드 검증 → 세션 완료
+async function handleMfaVerify(code: string) {
+  const { error } = await signIn.mfa.verifyEmailCode({ code })
+  if (error) {
+    setLocalErrors({ code: clerkErrorToKorean(error.code) })
+    return
+  }
+
+  if (signIn.status === 'complete') {
+    await signIn.finalize({
+      navigate: ({ decorateUrl }) => {
+        const url = decorateUrl('/dashboard')
+        if (url.startsWith('http')) window.location.href = url
+        else router.push(url)
+      },
+    })
+  }
+}
+
+// 재발송 — 동일 API 재호출
+async function handleResend() {
+  const { error } = await signIn.mfa.sendEmailCode()
+  if (error) setLocalErrors({ global: clerkErrorToKorean(error.code) })
+}
+```
+
+#### Step 흐름
+
+```
+[비밀번호 입력] → signIn.password()
+  ├─ status === 'complete'          → signIn.finalize() → /dashboard
+  └─ status === 'needs_second_factor'
+        ↓
+     signIn.mfa.sendEmailCode()     → 이메일 OTP 발송
+        ↓
+     [OTP 입력 화면]
+        ↓
+     signIn.mfa.verifyEmailCode()
+        ↓
+     status === 'complete'          → signIn.finalize() → /dashboard
+```
+
+#### Webhook 주의사항 — `email_addresses` 방어 처리
+
+Clerk 대시보드에서 보내는 **테스트 웹훅**은 합성(synthetic) 데이터를 사용하므로
+`email_addresses` 배열이 비어 있을 수 있습니다.
+웹훅 핸들러에서 이메일이 없다고 **400을 반환하면** Clerk이 재시도(retry)하며 실패로 기록합니다.
+
+```typescript
+// ✅ 올바른 처리 — 이메일 없을 때 200으로 조용히 무시
+const list = Array.isArray(email_addresses) ? email_addresses : []
+const email = list.find(e => e.id === primary_email_address_id)?.email_address
+              ?? list[0]?.email_address
+
+if (!email) {
+  return Response.json({ ok: true, skipped: 'no_email' })  // ✅ 200
+}
+// ❌ return Response.json({ error: 'No email found' }, { status: 400 })
 ```
 
 ---
@@ -613,6 +707,9 @@ export async function POST(req: Request) {
 - [ ] 세션 activity 정보: `useSessionList()` ❌ → `user.getSessions()` ✅
 - [ ] 에러 메시지: `error.message` 직접 표시 ❌ → `clerkErrorToKorean(error.code)` ✅
 - [ ] sign-in / sign-up 페이지: 이미 로그인된 경우 대시보드 리다이렉트 처리 필수
+- [ ] `signIn.password()` 후 `status === 'needs_second_factor'` 처리 필수 — 미처리 시 로그인 무한 대기
+- [ ] MFA 이메일 OTP: `signIn.mfa.sendEmailCode()` → `signIn.mfa.verifyEmailCode({ code })` 순서
+- [ ] Webhook: 이메일 없는 테스트 이벤트에 400 반환 금지 → `{ ok: true, skipped: 'no_email' }`로 200 반환
 - [ ] Clerk quickstart 실행 시 자동 생성되는 샘플 파일 즉시 삭제
 - [ ] `@clerk/ui`, `next-themes`는 커스텀 UI 구현 시 불필요 — 설치하지 말 것
 
@@ -625,6 +722,7 @@ export async function POST(req: Request) {
 | 공식 문서 홈 | https://clerk.com/docs |
 | 커스텀 플로우 개요 (Core 3) | https://clerk.com/docs/guides/development/custom-flows/overview |
 | 이메일+비번 커스텀 로그인 | https://clerk.com/docs/guides/development/custom-flows/authentication/sign-in-or-up |
+| **MFA 커스텀 플로우 (Core 3)** | https://clerk.com/docs/guides/development/custom-flows/authentication/multi-factor-authentication |
 | **봇 방지 / CAPTCHA (커스텀 플로우)** | https://clerk.com/docs/guides/development/custom-flows/authentication/bot-sign-up-protection |
 | 비밀번호 변경 (인증된 사용자) | https://clerk.com/docs/guides/development/custom-flows/account-updates/change-password |
 | 비밀번호 재설정 (비인증 사용자) | https://clerk.com/docs/guides/development/custom-flows/account-updates/forgot-password |

@@ -7,7 +7,7 @@ import Link from "next/link";
 import { PenLine, Loader2, Eye, EyeOff, Mail, Check } from "lucide-react";
 import { clerkErrorToKorean } from "@/lib/clerk-errors";
 
-type Step = "login" | "forgot" | "code-entry" | "reset-done";
+type Step = "login" | "forgot" | "code-entry" | "reset-done" | "mfa";
 
 type FormErrors = {
   email?: string;
@@ -95,6 +95,7 @@ export default function SignInPage() {
   const [showNewPw, setShowNewPw] = useState(false);
   const [localErrors, setLocalErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
 
   const isLoading = fetchStatus === "fetching" || submitting;
   const clerkGlobalError = errors?.global?.[0]?.message;
@@ -148,6 +149,51 @@ export default function SignInPage() {
           }
         },
       });
+    } else if (signIn.status === "needs_second_factor") {
+      /* 2차 인증 필요 — 이메일 OTP 코드 발송 후 mfa 단계로 전환 */
+      const { error: mfaSendError } = await signIn.mfa.sendEmailCode();
+      if (mfaSendError) {
+        setLocalErrors({ global: clerkErrorToKorean(mfaSendError.code) });
+        return;
+      }
+      setStep("mfa");
+    }
+  }
+
+  /* ── 2차 인증(MFA): 이메일 OTP 코드 검증 ── */
+  async function handleMfaVerify(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!mfaCode.trim()) {
+      setLocalErrors({ code: "인증 코드를 입력해주세요." });
+      return;
+    }
+    setLocalErrors({});
+    setSubmitting(true);
+
+    try {
+      const { error } = await signIn.mfa.verifyEmailCode({ code: mfaCode.trim() });
+      if (error) {
+        setLocalErrors({ code: clerkErrorToKorean(error.code) });
+        return;
+      }
+
+      if (signIn.status === "complete") {
+        await signIn.finalize({
+          navigate: ({ decorateUrl }) => {
+            const url = decorateUrl("/dashboard");
+            if (url.startsWith("http")) {
+              window.location.href = url;
+            } else {
+              router.push(url);
+            }
+          },
+        });
+      }
+    } catch {
+      setLocalErrors({ global: "오류가 발생했습니다. 다시 시도해주세요." });
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -523,6 +569,71 @@ export default function SignInPage() {
                   setNewPassword("");
                   setConfirmPassword("");
                   setLocalErrors({});
+                }}
+                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                코드를 받지 못하셨나요? 다시 발송
+              </button>
+            </form>
+          </>
+        )}
+
+        {/* ── 2차 인증(MFA) ── */}
+        {step === "mfa" && (
+          <>
+            <div className="mb-6">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
+                  <Mail className="h-5 w-5 text-primary" />
+                </div>
+                <h1 className="text-2xl font-semibold text-foreground">
+                  2차 인증
+                </h1>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{email}</span>
+                으로 발송된 인증 코드를 입력해주세요
+              </p>
+            </div>
+
+            {localErrors.global && (
+              <div className="mb-4 p-3 rounded-md bg-red-50 border border-red-100 text-sm text-red-600">
+                {localErrors.global}
+              </div>
+            )}
+
+            <form onSubmit={handleMfaVerify} className="space-y-4" noValidate>
+              <InputField
+                label="인증 코드"
+                id="mfaCode"
+                type="text"
+                value={mfaCode}
+                onChange={setMfaCode}
+                placeholder="이메일에서 확인한 6자리 코드"
+                error={localErrors.code}
+                autoComplete="one-time-code"
+              />
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-2 px-4 bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "인증 완료"
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setLocalErrors({});
+                  const { error } = await signIn.mfa.sendEmailCode();
+                  if (error) {
+                    setLocalErrors({ global: clerkErrorToKorean(error.code) });
+                  }
                 }}
                 className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
               >

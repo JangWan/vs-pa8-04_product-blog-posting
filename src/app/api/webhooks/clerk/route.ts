@@ -53,13 +53,13 @@ export async function POST(req: Request) {
     const { id: clerk_user_id, email_addresses, primary_email_address_id } =
       evt.data as UserCreatedEvent["data"];
 
-    const primaryEmail = email_addresses.find(
-      (e) => e.id === primary_email_address_id
-    );
-    const email = primaryEmail?.email_address ?? email_addresses[0]?.email_address;
+    const list = Array.isArray(email_addresses) ? email_addresses : [];
+    const primaryEmail = list.find((e) => e.id === primary_email_address_id);
+    const email = primaryEmail?.email_address ?? list[0]?.email_address;
 
+    /* 테스트 웹훅 등 이메일 없는 합성 이벤트는 수신 확인만 하고 조용히 무시 */
     if (!email) {
-      return Response.json({ error: "No email found" }, { status: 400 });
+      return Response.json({ ok: true, skipped: "no_email" });
     }
 
     await db.insert(users).values({
