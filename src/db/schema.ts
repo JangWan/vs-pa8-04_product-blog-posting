@@ -84,10 +84,41 @@ export const contentVersions = pgTable(
   ],
 );
 
+// Phase 2: 다국어 번역본 (콘텐츠+언어당 최대 1행)
+export const contentTranslations = pgTable(
+  "content_translations",
+  {
+    id: text("id").primaryKey(),
+    content_id: text("content_id")
+      .notNull()
+      .references(() => contents.id, { onDelete: "cascade" }),
+    target_lang: varchar("target_lang", { length: 2 }).notNull(),
+    translated_body: text("translated_body").notNull().default(""),
+    translated_seo_meta: json("translated_seo_meta")
+      .notNull()
+      .default({ title: "", description: "", slug: "", keywords: [] }),
+    /* status: 'pending' | 'streaming' | 'completed' | 'failed' */
+    status: text("status").notNull().default("pending"),
+    error_message: text("error_message"),
+    created_at: timestamp("created_at").defaultNow().notNull(),
+    updated_at: timestamp("updated_at")
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("content_translations_content_id_target_lang_uk").on(
+      table.content_id,
+      table.target_lang,
+    ),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Guideline = typeof guidelines.$inferSelect;
 export type Content = typeof contents.$inferSelect;
 export type ContentVersion = typeof contentVersions.$inferSelect;
+export type ContentTranslation = typeof contentTranslations.$inferSelect;
 
 export type SeoMeta = {
   title: string;

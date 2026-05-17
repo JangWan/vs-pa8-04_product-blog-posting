@@ -1,40 +1,13 @@
 import { Hono } from "hono";
-import { createMiddleware } from "hono/factory";
 import { requireAuth } from "@/backend/middleware/clerk-auth";
+import { requireContentOwner } from "@/backend/middleware/content-owner";
 import { db } from "@/db";
-import { contentVersions, contents, users } from "@/db/schema";
+import { contentVersions, contents } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 
 type Vars = { userId: string; dbUserId: string };
 
 const contentsRoute = new Hono<{ Variables: Vars }>();
-
-/* 소유권 검증: URL의 :id 콘텐츠가 현재 사용자의 것인지 확인.
-   타인 콘텐츠는 ID 노출 방지를 위해 403 대신 404로 응답 (BR-04 + UC §5-1). */
-const requireContentOwner = createMiddleware<{ Variables: Vars }>(
-  async (c, next) => {
-    const clerkUserId = c.get("userId");
-    const contentId = c.req.param("id");
-    if (!contentId) return c.json({ error: "Not found" }, 404);
-
-    const dbUser = await db.query.users.findFirst({
-      where: eq(users.clerk_user_id, clerkUserId),
-    });
-    if (!dbUser) return c.json({ error: "Unauthorized" }, 401);
-
-    const owns = await db
-      .select({ id: contents.id })
-      .from(contents)
-      .where(
-        and(eq(contents.id, contentId), eq(contents.user_id, dbUser.id)),
-      )
-      .limit(1);
-    if (owns.length === 0) return c.json({ error: "Not found" }, 404);
-
-    c.set("dbUserId", dbUser.id);
-    await next();
-  },
-);
 
 const MAX_BODY_BYTES = 100 * 1024; // BR-20: 100KB
 

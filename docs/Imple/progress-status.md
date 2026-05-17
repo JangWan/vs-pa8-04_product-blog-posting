@@ -147,6 +147,34 @@
 
 ---
 
+## 7. UC-20~22 — 다국어 자동 번역 (Phase 2)
+
+### 7-A. DB·백엔드 (완료)
+
+| # | 항목 | 상태 | 비고 |
+|---|------|------|------|
+| 07-01 | DB 스키마 — `content_translations` 테이블 | ✅ 완료 | (content_id, target_lang) UNIQUE · CASCADE |
+| 07-02 | 마이그레이션 실행 | ⏳ 사용자 액션 | `pnpm drizzle-kit generate` + `migrate`/`push` |
+| 07-03 | requireContentOwner 공통 미들웨어 분리 | ✅ 완료 | `src/backend/middleware/content-owner.ts` |
+| 07-04 | service: buildTranslationInstruction + extractTranslatedSeoMeta | ✅ 완료 | TRD §3-4 Gemini 프롬프트 가이드 준수 |
+| 07-05 | GET /api/contents/:id/translations (상태 목록) | ✅ 완료 | `source_lang` + 언어별 상태 |
+| 07-06 | GET /api/contents/:id/translations/:lang | ✅ 완료 | UC-21 본문 조회 |
+| 07-07 | DELETE /api/contents/:id/translations/:lang | ✅ 완료 | UC-22 |
+| 07-08 | POST /api/contents/:id/translations/stream | ✅ 완료 | force 분기·BR-22·BR-23·status 관리·동시 1건 |
+| 07-09 | 5-2 실패 처리 (status='failed' + error_message) | ✅ 완료 | Gemini 예외 시 자동 기록 |
+
+### 7-B. 프론트엔드 (완료)
+
+| # | 항목 | 상태 | 비고 |
+|---|------|------|------|
+| 07-10 | use-translations 훅 (list/detail/delete/stream) | ✅ 완료 | useTranslationStream — abort·conflict·error |
+| 07-11 | TranslationModal 컴포넌트 (UC-20) | ✅ 완료 | quota Dialog(BR-21) + 본 Dialog(좌 원문/우 스트리밍) + 덮어쓰기 AlertDialog |
+| 07-12 | 이력 상세 번역 탭 본문·액션 통합 (UC-21) | ✅ 완료 | 번역본 복사·다운로드(`-{lang}` suffix)·재번역·삭제 |
+| 07-13 | 번역 삭제 AlertDialog (UC-22) | ✅ 완료 | usecase-common §4-4 패턴 |
+| 07-14 | Empty State — `{lang} 번역본이 없습니다` + CTA | ✅ 완료 | UC §4-3 |
+
+---
+
 ## 현재 진행 단계
 
 ```
@@ -156,10 +184,10 @@
 [완료] UC-06 대시보드 (전체)
 [완료] UC-07~09 콘텐츠 생성 (전체 — API + 폼 + 에디터)
 [완료] UC-10~14 지침 관리 (API + UI)
-[완료] UC-15~19 백엔드 (DB schema · 6개 API · 자동 스냅샷)
-[완료] UC-15~19 프론트엔드 (/history, /history/[id], /versions, /compare)
-[대기] 사용자 마이그레이션 실행 (drizzle-kit generate + migrate)
-[다음] UC-20~22 다국어 번역 (Phase 2)
+[완료] UC-15~19 백엔드 + 프론트엔드 (콘텐츠 이력 관리)
+[완료] UC-20~22 백엔드 + 프론트엔드 (다국어 번역)
+[대기] 사용자 마이그레이션 실행 — content_translations 테이블 추가분
+[다음] Phase 3 (결제·조직 관리 등)
 ```
 
 ---

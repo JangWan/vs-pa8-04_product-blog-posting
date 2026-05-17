@@ -298,12 +298,13 @@ session.sendRealtimeInput({
 
 ## References
 
-| 문서 | URL |
-|------|-----|
-| Gemini API 공식 문서 | https://ai.google.dev/gemini-api/docs |
-| 모델 목록 | https://ai.google.dev/gemini-api/docs/models |
-| Text Generation | https://ai.google.dev/gemini-api/docs/text-generation |
-| Interactions API | https://ai.google.dev/gemini-api/docs/interactions |
-| Live API | https://ai.google.dev/gemini-api/docs/live |
-| 요금 정보 | https://ai.google.dev/gemini-api/docs/pricing |
-| @google/genai npm | https://www.npmjs.com/package/@google/genai |
+| 문서                | URL                                                   |
+| ----------------- | ----------------------------------------------------- |
+| Gemini API 공식 문서  | https://ai.google.dev/gemini-api/docs                 |
+| 모델 목록             | https://ai.google.dev/gemini-api/docs/models          |
+| 모델 중단 목록          | https://ai.google.dev/gemini-api/docs/deprecations    |
+| Text Generation   | https://ai.google.dev/gemini-api/docs/text-generation |
+| Interactions API  | https://ai.google.dev/gemini-api/docs/interactions    |
+| Live API          | https://ai.google.dev/gemini-api/docs/live            |
+| 요금 정보             | https://ai.google.dev/gemini-api/docs/pricing         |
+| @google/genai npm | https://www.npmjs.com/package/@google/genai           |

@@ -9,9 +9,11 @@ import {
   AlertCircle,
   ChevronRight,
   Copy,
+  Download,
   Languages,
   History as HistoryIcon,
   Pencil,
+  RotateCcw,
   Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -33,8 +35,15 @@ import {
   useDeleteHistory,
   useHistoryDetail,
 } from "@/features/history/hooks/use-history";
+import {
+  useDeleteTranslation,
+  useTranslationDetail,
+  useTranslationsList,
+  type TargetLang,
+} from "@/features/translations/hooks/use-translations";
+import { TranslationModal } from "@/features/translations/components/translation-modal";
 
-const LANG_LABEL: Record<"ko" | "en", string> = {
+const LANG_LABEL: Record<TargetLang, string> = {
   ko: "한국어",
   en: "English",
 };
@@ -42,6 +51,18 @@ const LANG_LABEL: Record<"ko" | "en", string> = {
 function formatDate(iso: string) {
   const d = new Date(iso);
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function downloadMarkdown(filename: string, body: string) {
+  const blob = new Blob([body], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 export default function HistoryDetailPage({
@@ -55,17 +76,34 @@ export default function HistoryDetailPage({
   const { data, isLoading, isError, error } = useHistoryDetail(id);
   const deleteMutation = useDeleteHistory();
 
-  const sourceLang: "ko" | "en" = data?.source_lang ?? "ko";
-  const otherLang: "ko" | "en" = sourceLang === "ko" ? "en" : "ko";
+  const sourceLang: TargetLang = data?.source_lang ?? "ko";
+  const otherLang: TargetLang = sourceLang === "ko" ? "en" : "ko";
 
   const [activeTab, setActiveTab] = useState<"source" | "other">("source");
   const [pendingDelete, setPendingDelete] = useState(false);
+  const [translationModalOpen, setTranslationModalOpen] = useState(false);
+  const [pendingTranslationDelete, setPendingTranslationDelete] =
+    useState<TargetLang | null>(null);
 
-  async function handleCopy() {
-    if (!data) return;
+  /* 번역 상태 목록 (탭 빨강 점·status용) */
+  const { data: translations } = useTranslationsList(id);
+  const otherStatus = translations?.data.find(
+    (t) => t.target_lang === otherLang,
+  );
+  const hasCompletedOther = otherStatus?.status === "completed";
+
+  /* 번역 본문 — 탭이 "other"이고 completed일 때만 fetch */
+  const { data: translationDetail, isLoading: translationLoading } =
+    useTranslationDetail(id, otherLang, {
+      enabled: activeTab === "other" && hasCompletedOther,
+    });
+
+  const deleteTranslation = useDeleteTranslation(id);
+
+  async function handleCopy(text: string, label: string) {
     try {
-      await navigator.clipboard.writeText(data.body);
-      toast.success("클립보드에 복사되었습니다.");
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} 클립보드에 복사되었습니다.`);
     } catch {
       toast.error("복사에 실패했습니다.");
     }
@@ -78,6 +116,28 @@ export default function HistoryDetailPage({
         router.push("/history");
       },
       onError: (err) => toast.error(err.message),
+    });
+  }
+
+  function handleTranslationDownload() {
+    if (!translationDetail || !data) return;
+    const slug = translationDetail.translated_seo_meta.slug || data.seo_meta.slug || "untitled";
+    const date = formatDate(translationDetail.updated_at).replaceAll(".", "-");
+    downloadMarkdown(`${date}-${slug}-${otherLang}.md`, translationDetail.translated_body);
+  }
+
+  function handleTranslationDelete() {
+    if (!pendingTranslationDelete) return;
+    const lang = pendingTranslationDelete;
+    deleteTranslation.mutate(lang, {
+      onSuccess: () => {
+        toast.success("번역본이 삭제되었습니다.");
+        setPendingTranslationDelete(null);
+      },
+      onError: (err) => {
+        toast.error(err.message);
+        setPendingTranslationDelete(null);
+      },
     });
   }
 
@@ -134,7 +194,6 @@ export default function HistoryDetailPage({
                 </div>
               </div>
 
-              {/* 우상단 액션 5개 (UC-15 §3 step 5) */}
               <div className="flex items-center gap-0.5 shrink-0">
                 <Button
                   type="button"
@@ -150,7 +209,7 @@ export default function HistoryDetailPage({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={handleCopy}
+                  onClick={() => handleCopy(data.body, "원문이")}
                   className="gap-1 h-8 px-2 text-muted-foreground hover:text-foreground"
                 >
                   <Copy className="h-3.5 w-3.5" />
@@ -160,7 +219,7 @@ export default function HistoryDetailPage({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => toast.info("번역 기능은 곧 제공될 예정입니다 (UC-20).")}
+                  onClick={() => setTranslationModalOpen(true)}
                   className="gap-1 h-8 px-2 text-muted-foreground hover:text-foreground"
                 >
                   <Languages className="h-3.5 w-3.5" />
@@ -190,7 +249,7 @@ export default function HistoryDetailPage({
             </div>
           </header>
 
-          {/* 탭 (원문 + 번역 placeholder) */}
+          {/* 탭 */}
           <div className="border-b border-border">
             <div className="flex gap-1" role="tablist">
               <button
@@ -213,13 +272,16 @@ export default function HistoryDetailPage({
                 aria-selected={activeTab === "other"}
                 onClick={() => setActiveTab("other")}
                 className={cn(
-                  "px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px",
+                  "px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px inline-flex items-center gap-1.5",
                   activeTab === "other"
                     ? "border-primary text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
                 {LANG_LABEL[otherLang]}
+                {hasCompletedOther && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                )}
               </button>
             </div>
           </div>
@@ -230,26 +292,40 @@ export default function HistoryDetailPage({
               <MarkdownView source={data.body} />
             </div>
           ) : (
-            <div className="border border-border rounded-lg p-10 flex flex-col items-center text-center space-y-3">
-              <Languages className="h-9 w-9 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                {LANG_LABEL[otherLang]} 번역본이 없습니다.
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => toast.info("번역 기능은 곧 제공될 예정입니다 (UC-20).")}
-              >
-                <Languages className="h-3.5 w-3.5 mr-1" />
-                번역하기
-              </Button>
-            </div>
+            <TranslationTab
+              loading={translationLoading}
+              hasTranslation={Boolean(hasCompletedOther)}
+              translatedBody={translationDetail?.translated_body ?? ""}
+              status={otherStatus?.status}
+              errorMessage={otherStatus?.error_message ?? null}
+              langLabel={LANG_LABEL[otherLang]}
+              onTranslate={() => setTranslationModalOpen(true)}
+              onCopy={() =>
+                handleCopy(
+                  translationDetail?.translated_body ?? "",
+                  `${LANG_LABEL[otherLang]} 번역본이`,
+                )
+              }
+              onDownload={handleTranslationDownload}
+              onRequestDelete={() => setPendingTranslationDelete(otherLang)}
+            />
           )}
         </>
       )}
 
-      {/* 삭제 확인 AlertDialog (UC-15 §4-1, BR-24) */}
+      {/* 번역 모달 */}
+      {data && (
+        <TranslationModal
+          open={translationModalOpen}
+          contentId={id}
+          sourceLang={sourceLang}
+          sourceBody={data.body}
+          initialTargetLang={otherLang}
+          onOpenChange={setTranslationModalOpen}
+        />
+      )}
+
+      {/* 이력 삭제 확인 AlertDialog (UC-15 §4-1, BR-24) */}
       <AlertDialog
         open={pendingDelete}
         onOpenChange={(open) => {
@@ -278,6 +354,166 @@ export default function HistoryDetailPage({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 번역 삭제 확인 AlertDialog (UC-22) */}
+      <AlertDialog
+        open={pendingTranslationDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleteTranslation.isPending) {
+            setPendingTranslationDelete(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>정말 삭제하시겠습니까?</AlertDialogTitle>
+            <AlertDialogDescription>
+              이 번역본을 삭제하면 복구할 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteTranslation.isPending}>
+              취소
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleTranslationDelete();
+              }}
+              disabled={deleteTranslation.isPending}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleteTranslation.isPending ? "삭제 중..." : "삭제"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </motion.div>
+  );
+}
+
+/* ── 번역 탭 본문 ── */
+function TranslationTab({
+  loading,
+  hasTranslation,
+  translatedBody,
+  status,
+  errorMessage,
+  langLabel,
+  onTranslate,
+  onCopy,
+  onDownload,
+  onRequestDelete,
+}: {
+  loading: boolean;
+  hasTranslation: boolean;
+  translatedBody: string;
+  status: "pending" | "streaming" | "completed" | "failed" | undefined;
+  errorMessage: string | null;
+  langLabel: string;
+  onTranslate: () => void;
+  onCopy: () => void;
+  onDownload: () => void;
+  onRequestDelete: () => void;
+}) {
+  /* 진행 중·실패 상태 표시 */
+  if (status === "streaming") {
+    return (
+      <div className="border border-border rounded-lg p-6 space-y-3">
+        <p className="text-sm text-muted-foreground">{langLabel} 번역이 진행 중입니다…</p>
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-3/4" />
+      </div>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <div className="border border-destructive/30 bg-destructive/5 rounded-lg p-6 space-y-3">
+        <p className="text-sm text-destructive font-medium">번역에 실패했습니다.</p>
+        {errorMessage && (
+          <p className="text-xs text-muted-foreground">{errorMessage}</p>
+        )}
+        <Button type="button" variant="outline" size="sm" onClick={onTranslate}>
+          <RotateCcw className="h-3.5 w-3.5 mr-1" />
+          다시 번역
+        </Button>
+      </div>
+    );
+  }
+
+  if (!hasTranslation) {
+    /* Empty State (UC §4-3 → UC-20 진입) */
+    return (
+      <div className="border border-border rounded-lg p-10 flex flex-col items-center text-center space-y-3">
+        <Languages className="h-9 w-9 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">{langLabel} 번역본이 없습니다.</p>
+        <Button type="button" variant="outline" size="sm" onClick={onTranslate}>
+          <Languages className="h-3.5 w-3.5 mr-1" />
+          번역하기
+        </Button>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <Skeleton className="h-4 w-3/4" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-end gap-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onCopy}
+          className="gap-1 h-8 text-muted-foreground hover:text-foreground"
+        >
+          <Copy className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">번역본 복사</span>
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onDownload}
+          className="gap-1 h-8 text-muted-foreground hover:text-foreground"
+        >
+          <Download className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">다운로드</span>
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onTranslate}
+          className="gap-1 h-8 text-muted-foreground hover:text-foreground"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">다시 번역</span>
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onRequestDelete}
+          className="gap-1 h-8 text-muted-foreground hover:text-destructive"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">번역 삭제</span>
+        </Button>
+      </div>
+
+      <div className="max-w-4xl">
+        <MarkdownView source={translatedBody} />
+      </div>
+    </div>
   );
 }

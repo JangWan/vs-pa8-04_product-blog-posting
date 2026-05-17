@@ -3,6 +3,7 @@ import historyRoute from "@/features/history/backend/route";
 import guidelinesRoute from "@/features/guidelines/backend/route";
 import generateRoute from "@/features/generate/backend/route";
 import contentsRoute from "@/features/content-versions/backend/route";
+import translationsRoute from "@/features/translations/backend/route";
 
 let _app: Hono | null = null;
 
@@ -19,5 +20,6 @@ function createApp(): Hono {
   app.route("/guidelines", guidelinesRoute);
   app.route("/generate", generateRoute);
   app.route("/contents", contentsRoute);
+  app.route("/contents", translationsRoute);
   return app;
 }
