@@ -20,7 +20,7 @@ export default function DashboardLayout({
         <MobileHeader />
 
         {/* 페이지 콘텐츠 — 공통 좌우 여백 및 상하 패딩 (모든 페이지 통일) */}
-        <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-10 py-8">
+        <main className="flex-1 overflow-y-auto [scrollbar-gutter:stable] px-4 sm:px-6 lg:px-10 py-8">
           {children}
         </main>
       </div>

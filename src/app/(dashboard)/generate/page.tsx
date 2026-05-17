@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { useGuidelines } from "@/features/guidelines/hooks/use-guidelines";
 import { useGenerateStream } from "@/features/generate/hooks/use-generate-stream";
+import { PageShell } from "@/components/layout/page-shell";
 
 /* ── 키워드 태그 입력 컴포넌트 ── */
 function KeywordInput({
@@ -102,7 +103,7 @@ function StreamingPreview({
   return (
     <div
       ref={streamRef}
-      className="mt-6 p-4 border border-border rounded-lg bg-secondary/30 max-h-96 overflow-y-auto"
+      className="p-4 border border-border rounded-lg bg-secondary/30 max-h-96 overflow-y-auto"
     >
       <p className="text-xs text-muted-foreground mb-3 font-medium">
         AI 초안 생성 중...
@@ -125,17 +126,17 @@ export default function GeneratePage() {
   const [topic, setTopic] = useState("");
   const [keywords, setKeywords] = useState<string[]>([]);
   const [direction, setDirection] = useState("");
-  const [guidelineId, setGuidelineId] = useState<string | null>(null);
+  /* undefined = 사용자 미선택(기본 지침 자동 적용), null = "없음" 명시 선택, string = 특정 지침 선택 */
+  const [userGuidelineId, setUserGuidelineId] = useState<string | null | undefined>(undefined);
   const [topicError, setTopicError] = useState("");
 
   const streamRef = useRef<HTMLDivElement>(null);
 
-  /* 기본 지침 자동 선택 */
-  useEffect(() => {
-    if (!guidelines) return;
-    const def = guidelines.find((g) => g.is_default);
-    if (def) setGuidelineId(def.id);
-  }, [guidelines]);
+  /* 기본 지침 파생값: useEffect + setState 없이 직접 계산 → 리렌더 없음 */
+  const guidelineId =
+    userGuidelineId !== undefined
+      ? userGuidelineId
+      : (guidelines?.find((g) => g.is_default)?.id ?? null);
 
   /* 스트리밍 중 자동 스크롤 */
   useEffect(() => {
@@ -144,7 +145,7 @@ export default function GeneratePage() {
     }
   }, [streamText, status]);
 
-  /* 완료 후 토스트 (done 상태는 onDone 콜백에서 처리) */
+  /* 에러/취소 토스트 */
   useEffect(() => {
     if (status === "error" && error) {
       toast.error(error.message, {
@@ -185,22 +186,13 @@ export default function GeneratePage() {
   const showPreview = isStreaming && streamText;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
-      className="space-y-6"
+    <PageShell
+      title="콘텐츠 생성"
+      description="주제를 입력하면 AI가 SEO 최적화된 블로그 초안을 작성합니다."
     >
-      {/* 헤더는 wide 영역 활용 */}
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">콘텐츠 생성</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          주제를 입력하면 AI가 SEO 최적화된 블로그 초안을 작성합니다.
-        </p>
-      </div>
 
-      {/* 폼 본체는 가독성을 위해 max-w-3xl 제한 */}
-      <div className="max-w-3xl space-y-5">
+      {/* 폼 본체 */}
+      <div className="space-y-5">
         {/* 주제 */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
@@ -263,7 +255,7 @@ export default function GeneratePage() {
           <Label>AI 지침 (선택)</Label>
           <Select
             value={guidelineId ?? "none"}
-            onValueChange={(v) => setGuidelineId(v === "none" ? null : v)}
+            onValueChange={(v) => setUserGuidelineId(v === "none" ? null : v)}
             disabled={isStreaming}
           >
             <SelectTrigger>
@@ -354,7 +346,7 @@ export default function GeneratePage() {
         )}
       </div>
 
-      {/* 스트리밍 미리보기 — 폼과 동일한 너비로 정렬 */}
+      {/* 스트리밍 미리보기 */}
       <AnimatePresence>
         {showPreview && (
           <motion.div
@@ -362,12 +354,11 @@ export default function GeneratePage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="max-w-3xl"
           >
             <StreamingPreview text={streamText} streamRef={streamRef} />
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </PageShell>
   );
 }

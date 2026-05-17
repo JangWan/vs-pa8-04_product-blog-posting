@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import { format } from "date-fns";
+import { PageShell } from "@/components/layout/page-shell";
 import { ko } from "date-fns/locale";
 import {
   Pencil,
@@ -178,17 +179,10 @@ export default function DashboardPage() {
   const isEmptyState = !guidelinesLoading && !guidelinesError && guidelines.length === 0;
 
   return (
-    <div className="space-y-8">
-      {/* 페이지 헤더 */}
-      <div>
-        <h1 className="text-2xl font-semibold text-foreground tracking-tight">
-          안녕하세요, {displayName}님
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          오늘도 IndiePost AI로 콘텐츠를 작성해보세요.
-        </p>
-      </div>
-
+    <PageShell
+      title={`안녕하세요, ${displayName}님`}
+      description="오늘도 IndiePost AI로 콘텐츠를 작성해보세요."
+    >
       {/* ── 빠른 시작 CTA ── */}
       <Link
         href="/generate"
@@ -289,6 +283,6 @@ export default function DashboardPage() {
           )}
         </section>
       </div>
-    </div>
+    </PageShell>
   );
 }

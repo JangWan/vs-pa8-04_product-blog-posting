@@ -32,6 +32,7 @@ import {
   useSetDefaultGuideline,
   type GuidelineItem,
 } from "@/features/guidelines/hooks/use-guidelines";
+import { PageShell } from "@/components/layout/page-shell";
 
 /* ── Framer Motion variants (stagger 등장) ── */
 const containerVariants = {
@@ -210,18 +211,11 @@ export default function GuidelinesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* 헤더 */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground tracking-tight">
-            AI 지침 관리
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            브랜드 톤·문체 지침을 등록하면 AI가 일관된 스타일로 글을 씁니다.
-          </p>
-        </div>
-        {!isEmpty && (
+    <PageShell
+      title="AI 지침 관리"
+      description="브랜드 톤·문체 지침을 등록하면 AI가 일관된 스타일로 글을 씁니다."
+      actions={
+        !isEmpty ? (
           <Link
             href="/guidelines/new"
             className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground text-sm font-medium rounded hover:bg-primary/90 transition-colors shrink-0"
@@ -230,8 +224,9 @@ export default function GuidelinesPage() {
             <Plus className="h-4 w-4" />
             <span className="hidden sm:inline">새 지침</span>
           </Link>
-        )}
-      </div>
+        ) : undefined
+      }
+    >
 
       {/* 본문 */}
       {isLoading ? (
@@ -298,6 +293,6 @@ export default function GuidelinesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageShell>
   );
 }
