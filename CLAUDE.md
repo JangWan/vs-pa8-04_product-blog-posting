@@ -20,158 +20,88 @@ pnpm build        # 프로덕션 빌드
 pnpm lint         # ESLint
 pnpm type-check   # tsc --noEmit
 pnpm test         # Vitest 단위 테스트
-pnpm test <path>  # 단일 테스트 파일 실행 (예: pnpm test src/features/generate)
 ```
 
 ---
 
-## 프로젝트 개요
+## 절대 규칙 (예외 없음)
 
-**IndiePost AI** — 인디해커를 위한 AI 블로그 콘텐츠 자동 작성 서비스. 주제만 입력하면 브랜드 지침 + SEO 최적화가 적용된 마크다운 초안을 스트리밍으로 생성한다.
-
----
-
-## 아키텍처
-
-### 전체 구조
-
-```
-[브라우저] → [Vercel Edge / CDN] → [Next.js v16 App Router]
-                                        ├── /app/(public)/       # 랜딩·인증 (공개)
-                                        ├── /app/(dashboard)/    # 인증 필요 페이지
-                                        └── /app/api/[[...hono]] # Hono API 라우터
-                                                  ↓
-                                    [Clerk] [Neon Postgres] [Gemini API]
-```
-
-### 디렉토리 구조
-
-```
-src/
-├── app/
-│   ├── (public)/          # /, /sign-in, /sign-up
-│   ├── (dashboard)/       # /dashboard, /generate, /guidelines, /history
-│   └── api/[[...hono]]/   # Hono 위임 진입점 (route.ts)
-├── backend/
-│   ├── hono/              # Hono 앱 본체 (라우터 등록)
-│   └── middleware/        # 에러 핸들러, 컨텍스트
-├── features/
-│   ├── generate/          # 콘텐츠 생성 (API 핸들러, 컴포넌트, 훅)
-│   ├── guidelines/        # AI 지침 CRUD
-│   └── history/           # 생성 이력 조회
-├── lib/
-│   └── gemini.ts          # Gemini API 싱글턴 (서버 전용)
-└── db/
-    ├── schema.ts          # Drizzle 스키마 (users, guidelines, contents)
-    └── migrations/        # SQL 마이그레이션 (0001_, 0002_, ...)
-```
-
-### 핵심 기술 스택
-
-| 계층 | 기술 |
-|------|------|
-| 프레임워크 | Next.js v16 App Router + Hono (API 레이어) |
-| UI | shadcn/ui + Tailwind CSS v4 + Magic UI + Aceternity UI |
-| 모션 | Framer Motion |
-| 상태 관리 | Zustand (글로벌) + TanStack Query (서버 상태) |
-| 폼 | react-hook-form + Zod |
-| 에디터 | @mdxeditor/editor |
-| 인증 | Clerk v6+ |
-| DB | Neon Serverless Postgres + Drizzle ORM |
-| AI | Google Gemini API (`gemini-3.1-flash`) via `@google/genai` |
-| 테스트 | Vitest (단위) |
-
----
-
-## 주요 설계 규칙
-
-### Next.js / 컴포넌트
-
-- 모든 UI 컴포넌트 기본 `"use client"`
-- 서버 컴포넌트는 데이터 페칭이 명확한 경우에만
-- `page.tsx` / `layout.tsx`의 `params`, `searchParams`는 반드시 `await` (Next.js 15+)
-
-### API (Hono)
-
+- `GOOGLE_GENAI_API_KEY`, `CLERK_SECRET_KEY`, `DATABASE_URL` 절대 클라이언트 노출 금지
 - 모든 API 엔드포인트는 Clerk JWT 검증 필수 (`/api/webhooks/clerk` 제외)
-- Hono 레이어에서 Zod 스키마로 요청 검증 (SQL Injection, XSS 방지)
-- `GOOGLE_GENAI_API_KEY`, `CLERK_SECRET_KEY`, `DATABASE_URL`은 절대 클라이언트 노출 금지
-
-### AI 스트리밍
-
-- `POST /api/generate/stream` → `ReadableStream` 반환
-- 마지막 청크: `[DONE]{"id":"<contents.id>","seo_meta":{...}}` 형식
-- 클라이언트는 `[DONE]` prefix 감지 시 JSON 파싱 후 `/generate/[id]`로 리다이렉트
-
-### DB 마이그레이션
-
-- 파일명 prefix 규칙: `0001_create_users.sql`, `0002_create_guidelines.sql`
-- 멱등성 보장: `CREATE TABLE IF NOT EXISTS`
-- 연결 문자열: 서버리스 환경에서 `-pooler` suffix 필수
-- RLS 비활성화: `ALTER TABLE ... DISABLE ROW LEVEL SECURITY`
-
-### Clerk Webhook
-
-- 이벤트: `user.created` → `users` 테이블 INSERT
-- `svix` 라이브러리로 서명 검증 필수 (환경변수: `CLERK_WEBHOOK_SECRET`)
+- `any` 타입 사용 금지 — 모든 코드에 타입 안전성 보장
+- `git push --force`, `--no-verify` 사용 금지
+- 파일 삭제·대규모 리팩토링 등 파괴적인 작업은 반드시 사전 질문
 
 ---
 
-## 환경변수
+## 작업 방식
 
-```env
-# Clerk
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-CLERK_SECRET_KEY=
-CLERK_WEBHOOK_SECRET=
-NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
-NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+### 일반 프로세스
 
-# Neon
-DATABASE_URL=postgresql://...@ep-xxx-pooler.region.aws.neon.tech/dbname?sslmode=require
+- **대규모 수정 전**: 마크다운으로 구현 계획을 먼저 공유하고 승인을 받을 것
+- **단계별 진행**: 각 단계 후 검증을 수행할 것
+- **주석**: 함수의 '왜'를 한글 주석으로 기록할 것 (JSDoc 권장)
 
-# Gemini
-GOOGLE_GENAI_API_KEY=
-GEMINI_MODEL=gemini-3.1-flash
+### 기능 구현 순서
+
+기능 구현 전 반드시 아래 순서로 문서를 확인한 후 진행할 것.
+
+1. `docs/usecase/` 해당 유스케이스 파일 — 기능 정의·흐름·비즈니스 규칙
+2. `docs/IA.md` — 라우팅 구조·접근 제어
+3. `docs/TRD.md` — API 명세·DB 스키마
+4. `docs/tech/`, `docs/framework/` — 기술 연동 패턴
+5. 구현 완료 후 `docs/Imple/progress-status.md` 반드시 갱신
+
+사용자가 직접 수행해야 하는 항목(환경변수 설정, DB 마이그레이션 실행 등)은
+`docs/setup/project.md`를 확인하고 해당 항목을 사용자에게 안내할 것.
+
+### Git
+
+- 커밋은 직접 실행하지 말고 사용자가 실행할 CLI 명령어 텍스트로 제공할 것
+- 성격이 다른 변경은 커밋 분리 (코드 변경 / 문서 변경)
+- 커밋 메시지는 한글, 멀티라인 `-m` 형식 사용
+
+---
+
+## 참조 문서 (SSOT)
+
+> 아래 문서가 각 영역의 단일 진실 공급원입니다.
+> 내용을 이 파일에 직접 기재하지 말고 해당 문서를 읽고 따르십시오.
+
+### 프로젝트 이해
+
+| 문서 | 내용 |
+|------|------|
+| `docs/PRD.md` | 제품 목표·기능 범위·사용자 페르소나 |
+| `docs/IA.md` | 전체 라우팅 구조·사용자 흐름·접근 제어 |
+| `docs/TRD.md` | 기술 스택·API 명세·DB 스키마·아키텍처 |
+| `docs/usecase/usecase-common.md` | 유스케이스 인덱스·공통 비즈니스 규칙 |
+
+### 화면 구현 (필수 선행 확인)
+
+| 문서 | 내용 |
+|------|------|
+| `docs/design/design_guide-page-template.md` | **페이지 구조 템플릿·상태 패턴·Skeleton/Error/Empty·체크리스트** |
+| `docs/design/design_guide-layout.md` | 레이아웃 안정성·스크롤 흔들림·Radix UI 패딩 주입 방지 |
+| `docs/design/design_guide-web.md` | 웹 레이아웃 시스템 (사이드바·그리드·반응형) |
+| `docs/design/design_guide-common.md` | 디자인 토큰 (색상·반경·폰트·애니메이션) |
+
+### 기술 구현
+
+| 문서 | 내용 |
+|------|------|
+| `docs/tech/` | 외부 서비스 연동 가이드 (Clerk·Neon·Gemini 등) |
+| `docs/framework/` | 프레임워크별 사용 패턴 (Next.js·Hono·Drizzle 등) |
+| `docs/Imple/progress-status.md` | 현재 구현 진행 상태·다음 작업 대상 |
+
+---
+
+## 지침 요약
+
 ```
-
----
-
-## 라우팅 구조
-
-| URL | 인증 | 목적 |
-|-----|------|------|
-| `/` | 공개 | 랜딩 (SEO) |
-| `/sign-in`, `/sign-up` | 공개 | Clerk 인증 (이메일+비밀번호 only) |
-| `/dashboard` | 필수 | 최근 생성 5개 + 지침 현황 |
-| `/generate` | 필수 | 주제 입력 → AI 초안 스트리밍 생성 |
-| `/generate/[id]` | 필수 | MDX 에디터 + 저장·복사·다운로드 |
-| `/guidelines` | 필수 | 지침 목록 CRUD |
-| `/guidelines/new`, `/guidelines/[id]` | 필수 | 지침 생성·수정 |
-| `/history` | 필수 | 생성 이력 (커서 기반 무한스크롤, Phase 2) |
-| `/design-system` | 개발 전용 | 컴포넌트 플레이그라운드 (프로덕션 비공개) |
-
----
-
-## 디자인 시스템 (Notion 스타일)
-
-| 항목 | 값 |
-|------|-----|
-| 배경 | `#ffffff` / `#f6f5f4` (Warm White) |
-| 주요 텍스트 | `rgba(0,0,0,0.95)` |
-| Primary CTA | Sage Green `#99d1aa` |
-| 보더 | `1px solid rgba(0,0,0,0.1)` |
-| 버튼 Radius | 4px |
-| 카드 Radius | 8px (일반) / 12px (Featured) |
-| 폰트 | Inter (variable) |
-| 페이지 전환 | `opacity: 0→1, y: 8→0`, duration 0.2s, easeOut |
-
----
-
-## 해결 프로세스
-
-- **Implementation Plan**: 대규모 수정 전에는 반드시 마크다운 아티팩트로 구현 계획을 공유하고 승인을 받으십시오.
-- **Step-by-Step**: 단계별로 진행하며 각 단계 후 검증을 수행하십시오.
-- **사전 승인**: 파일 삭제나 대규모 리팩토링 등 파괴적인 작업은 반드시 사전에 질문하십시오.
-- **문서화**: 함수의 목적과 '왜' 구현했는지를 **한글 주석**으로 기록하십시오. (JSDoc 권장)
-- **TypeScript**: `any` 사용 금지. 모든 코드에 타입 안전성 보장.
+화면 구현 전  → docs/design/design_guide-page-template.md 필독
+API 구현 전   → docs/TRD.md + docs/tech/ 확인
+DB 변경 전    → docs/TRD.md 스키마 섹션 확인
+기능 구현 전  → docs/usecase/ 해당 유스케이스 파일 확인
+진행 상황     → docs/Imple/progress-status.md 갱신
+```
