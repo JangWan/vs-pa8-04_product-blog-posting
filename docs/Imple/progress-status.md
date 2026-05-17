@@ -113,6 +113,40 @@
 
 ---
 
+## 6. UC-15~19 — 콘텐츠 이력 관리 (Phase 2)
+
+### 6-A. DB·백엔드 (완료)
+
+| # | 항목 | 상태 | 비고 |
+|---|------|------|------|
+| 06-01 | DB 스키마 — `content_versions` 테이블 + `contents.source_lang` 컬럼 | ✅ 완료 | drizzle schema 정의 |
+| 06-02 | 마이그레이션 실행 | ⏳ 사용자 액션 | `pnpm drizzle-kit generate` + `pnpm drizzle-kit migrate` |
+| 06-03 | PUT /api/history/:id — BR-18 자동 스냅샷 | ✅ 완료 | 본문 변경 시 직전 본문 INSERT |
+| 06-04 | DELETE /api/history/:id (UC-15 §4-1) | ✅ 완료 | CASCADE로 `content_versions` 자동 삭제 (BR-24) |
+| 06-05 | GET /api/history — 커서 페이지네이션 (`?cursor=<last_id>`) | ✅ 완료 | `next_cursor` 응답 |
+| 06-06 | GET /api/history/:id — `source_lang` 응답 포함 | ✅ 완료 | UC-15 헤더 Badge용 |
+| 06-07 | GET /api/contents/:id/versions — 목록 (char_diff/is_current/cursor) | ✅ 완료 | CTE + LAG window function |
+| 06-08 | POST /api/contents/:id/versions — UC-17 수동 스냅샷 | ✅ 완료 | BR-20 100KB · 중복 본문 409 |
+| 06-09 | GET /api/contents/:id/versions/:no — 단건 | ✅ 완료 | 미리보기 Drawer용 |
+| 06-10 | POST /api/contents/:id/versions/:no/restore — UC-18 복원 | ✅ 완료 | BR-19 안전 스냅샷 → UPDATE |
+| 06-11 | GET /api/contents/:id/versions/diff?from=&to= — UC-19 | ✅ 완료 | 두 버전 본문 그대로 반환 |
+| 06-12 | 소유권 검증 미들웨어 (requireContentOwner) | ✅ 완료 | BR-04: 타인 콘텐츠 404 응답 |
+
+### 6-B. 프론트엔드 (완료)
+
+| # | 항목 | 상태 | 비고 |
+|---|------|------|------|
+| 06-13 | 의존성 설치 (react-diff-viewer-continued · @tanstack/react-virtual · react-markdown) | ✅ 완료 | |
+| 06-14 | /history 목록 (무한스크롤 · Empty State) | ✅ 완료 | useInfiniteQuery + IntersectionObserver |
+| 06-15 | /history/[id] 이력 상세 (UC-15, 탭·액션 5개·삭제) | ✅ 완료 | 번역 탭은 UC-20 미구현으로 placeholder toast |
+| 06-16 | /history/[id]/versions (UC-16·17·18) | ✅ 완료 | Sheet Drawer · floating bar · AlertDialog |
+| 06-17 | /history/[id]/versions/compare (UC-19) | ✅ 완료 | react-diff-viewer-continued ssr:false |
+| 06-18 | 사이드바 `/history` 메뉴 활성화 | ✅ 완료 | disabled 플래그 제거 |
+| 06-19 | 공통 MarkdownView 컴포넌트 | ✅ 완료 | 이력 상세·버전 미리보기 공유 |
+| 06-20 | TanStack Query 훅 분리 (history·versions) | ✅ 완료 | useInfinite/detail/mutations |
+
+---
+
 ## 현재 진행 단계
 
 ```
@@ -121,9 +155,11 @@
 [완료] UC-02~05 인증 (전체)
 [완료] UC-06 대시보드 (전체)
 [완료] UC-07~09 콘텐츠 생성 (전체 — API + 폼 + 에디터)
-[완료] UC-10~14 API (GET/POST/PUT/DELETE /api/guidelines)
-[완료] UC-10~14 지침 관리 UI (목록 · 생성 · 수정 · 삭제 · 기본 설정)
-[다음] (Phase 2) UC-15 생성 이력 페이지 (/history, 커서 기반 무한스크롤)
+[완료] UC-10~14 지침 관리 (API + UI)
+[완료] UC-15~19 백엔드 (DB schema · 6개 API · 자동 스냅샷)
+[완료] UC-15~19 프론트엔드 (/history, /history/[id], /versions, /compare)
+[대기] 사용자 마이그레이션 실행 (drizzle-kit generate + migrate)
+[다음] UC-20~22 다국어 번역 (Phase 2)
 ```
 
 ---

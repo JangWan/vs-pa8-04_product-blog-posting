@@ -4,6 +4,10 @@ import {
   timestamp,
   json,
   boolean,
+  integer,
+  uniqueIndex,
+  index,
+  varchar,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -46,6 +50,8 @@ export const contents = pgTable("contents", {
   direction: text("direction"),
   body: text("body").notNull(),
   seo_meta: json("seo_meta").notNull(),
+  // Phase 2: 원문 언어 (번역 from/to 결정용, 기본 'ko')
+  source_lang: varchar("source_lang", { length: 2 }).notNull().default("ko"),
   created_at: timestamp("created_at").defaultNow().notNull(),
   updated_at: timestamp("updated_at")
     .defaultNow()
@@ -53,9 +59,35 @@ export const contents = pgTable("contents", {
     .$onUpdate(() => new Date()),
 });
 
+// Phase 2: 콘텐츠 버전 스냅샷 (BR-18 자동, UC-17 수동, BR-19 복원 안전장치)
+export const contentVersions = pgTable(
+  "content_versions",
+  {
+    id: text("id").primaryKey(),
+    content_id: text("content_id")
+      .notNull()
+      .references(() => contents.id, { onDelete: "cascade" }),
+    version_no: integer("version_no").notNull(),
+    snapshot_body: text("snapshot_body").notNull(),
+    snapshot_seo_meta: json("snapshot_seo_meta").notNull(),
+    created_at: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("content_versions_content_id_version_no_uk").on(
+      table.content_id,
+      table.version_no,
+    ),
+    index("content_versions_content_id_created_at_idx").on(
+      table.content_id,
+      table.created_at,
+    ),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Guideline = typeof guidelines.$inferSelect;
 export type Content = typeof contents.$inferSelect;
+export type ContentVersion = typeof contentVersions.$inferSelect;
 
 export type SeoMeta = {
   title: string;

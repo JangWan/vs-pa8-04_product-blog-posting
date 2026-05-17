@@ -37,7 +37,7 @@ const navItems: NavItem[] = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
   { href: "/generate", icon: Pencil, label: "콘텐츠 생성" },
   { href: "/guidelines", icon: BookOpen, label: "AI 지침 관리" },
-  { href: "/history", icon: History, label: "생성 이력", disabled: true, badge: "예정" },
+  { href: "/history", icon: History, label: "생성 이력" },
 ];
 
 function SidebarUserButton() {

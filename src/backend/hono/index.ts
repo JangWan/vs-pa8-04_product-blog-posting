@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import historyRoute from "@/features/history/backend/route";
 import guidelinesRoute from "@/features/guidelines/backend/route";
 import generateRoute from "@/features/generate/backend/route";
+import contentsRoute from "@/features/content-versions/backend/route";
 
 let _app: Hono | null = null;
 
@@ -17,5 +18,6 @@ function createApp(): Hono {
   app.route("/history", historyRoute);
   app.route("/guidelines", guidelinesRoute);
   app.route("/generate", generateRoute);
+  app.route("/contents", contentsRoute);
   return app;
 }
