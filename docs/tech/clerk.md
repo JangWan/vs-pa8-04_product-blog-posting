@@ -742,3 +742,142 @@ export async function POST(req: Request) {
 | Webhook 설정 | https://clerk.com/docs/webhooks/overview |
 | 환경변수 전체 목록 | https://clerk.com/docs/deployments/clerk-environment-variables |
 | Neon + Clerk 연동 | https://clerk.com/docs/integrations/databases/neon |
+
+---
+
+## 조직(Organizations) 도입 시 트러블슈팅
+
+> 이 섹션은 기존 프로젝트에 Clerk Organizations 기능을 **나중에 활성화**할 때 발생하는 문제와 해결책을 정리합니다.
+> 신규 프로젝트도 동일 순서를 따르면 문제를 예방할 수 있습니다.
+
+---
+
+### 증상: 로그인 버튼 클릭 후 아무 반응이 없음 (세션 status: "pending")
+
+Clerk API 응답에 아래 두 가지가 동시에 나타나면 이 문제입니다.
+
+```json
+{
+  "status": "pending",
+  "tasks": [{ "key": "choose-organization" }],
+  "user": { "organization_memberships": [] }
+}
+```
+
+#### 원인 3가지 (모두 겹쳐서 발생)
+
+| # | 원인 | 설명 |
+|---|------|------|
+| 1 | Clerk Dashboard 설정 | Organizations 활성화 후 "조직 선택 필수" 옵션이 켜져 있음 |
+| 2 | 기존 사용자 데이터 누락 | 조직 기능 도입 전 가입한 사용자에게 Personal Org가 없음 (`organization_memberships: []`) |
+| 3 | 커스텀 로그인 페이지 미처리 | `signIn.status === "pending"` 분기가 없어 로그인 후 아무 동작도 하지 않음 |
+
+---
+
+### 해결 1 — Clerk Dashboard 설정 변경 (필수)
+
+> **경로**: Clerk Dashboard → Configure → Organizations
+
+다음과 같이 수정하고 **[Save changes]** 를 누릅니다.
+
+| 항목 | 설정값 |
+|------|--------|
+| **Membership options** | **Membership optional** 선택 |
+| **Create first organization automatically** | **OFF** (토글 끄기) |
+| Default naming rules 섹션 | 위 두 항목이 적용되면 자동으로 비활성화되거나 무시됨 |
+| **Allow user-created organizations** | **ON 유지** (사용자가 팀 조직을 직접 만들 수 있어야 하므로) |
+
+> ⚠️ **왜 "Create first organization automatically"를 OFF 하는가**
+> 이 옵션이 켜지면 Clerk가 자체적으로 조직을 생성하는데, 이 프로젝트는 `user.created` webhook이
+> Personal Org를 DB에 직접 생성합니다. 두 경로가 충돌하면 중복 조직이 생성되거나 DB 정합성이 깨집니다.
+
+---
+
+### 해결 2 — 기존 사용자 Personal Org 부트스트랩 (사용자 데이터 복구)
+
+조직 기능 도입 전 가입한 사용자는 Personal Org가 없습니다.
+`/api/admin/bootstrap-orgs` 엔드포인트를 1회 실행하면 전체 사용자를 순회하며 Personal Org를 생성합니다.
+
+```bash
+# curl
+curl -X POST http://localhost:3000/api/admin/bootstrap-orgs \
+  -H "x-bootstrap-secret: <.env.local의 BOOTSTRAP_SECRET 값>"
+```
+
+```powershell
+# PowerShell
+Invoke-WebRequest -Uri "http://localhost:3000/api/admin/bootstrap-orgs" `
+  -Method POST `
+  -Headers @{"x-bootstrap-secret" = "<BOOTSTRAP_SECRET 값>"}
+```
+
+- 이미 Personal Org가 있는 사용자는 `ON CONFLICT DO NOTHING`으로 안전하게 스킵됩니다.
+- 프로덕션 배포 후 조직 기능을 추가하는 경우에도 동일하게 실행합니다.
+
+---
+
+### 해결 3 — 커스텀 로그인 페이지 `pending` 분기 처리 (코드)
+
+커스텀 로그인 플로우에서 `signIn.password()` 후 `status`가 `"pending"`이면 아무 처리가 없어 사용자가 멈춥니다.
+
+```typescript
+// sign-in/page.tsx — handleLogin 내 status 분기
+if (signIn.status === "complete") {
+  await signIn.finalize({ navigate: ... })
+} else if (signIn.status === "needs_second_factor") {
+  await signIn.mfa.sendEmailCode()
+  setStep("mfa")
+} else if (signIn.status === "pending") {
+  // choose-organization 태스크 미완료 → TaskChooseOrganization 페이지로 이동
+  router.push("/select-org")
+}
+```
+
+`/select-org` 페이지에는 Clerk의 `<TaskChooseOrganization />` 컴포넌트를 배치합니다.
+
+```tsx
+// src/app/select-org/page.tsx
+import { TaskChooseOrganization } from "@clerk/nextjs"
+
+export default function SelectOrgPage() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <TaskChooseOrganization redirectUrlComplete="/dashboard" />
+    </div>
+  )
+}
+```
+
+`ClerkProvider`에 `taskUrls`를 추가해야 Clerk가 pending 세션을 자동으로 이 페이지로 리다이렉트합니다.
+
+```tsx
+// src/app/layout.tsx
+<ClerkProvider taskUrls={{ "choose-organization": "/select-org" }}>
+  {children}
+</ClerkProvider>
+```
+
+미들웨어(`proxy.ts`)에서 `/select-org`를 공개 경로로 허용합니다.
+
+```typescript
+// src/proxy.ts
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/select-org(.*)",   // ✅ pending 세션 접근 허용
+  "/api/webhooks(.*)",
+])
+```
+
+---
+
+### 자주 하는 실수 체크리스트 (Organizations 도입 시)
+
+- [ ] Organizations 활성화 전 `user.created` webhook이 Personal Org를 자동 생성하는지 확인
+- [ ] Clerk Dashboard → "Create first organization automatically" **반드시 OFF** — webhook과 이중 생성 충돌
+- [ ] Clerk Dashboard → "Membership optional" 설정 — 조직 없는 사용자도 로그인 가능하게
+- [ ] 기존 사용자 대상 부트스트랩 엔드포인트 1회 실행
+- [ ] 커스텀 로그인 페이지에 `status === "pending"` 분기 추가
+- [ ] `ClerkProvider`에 `taskUrls` 설정 추가
+- [ ] 미들웨어에서 `/select-org` 공개 경로 허용

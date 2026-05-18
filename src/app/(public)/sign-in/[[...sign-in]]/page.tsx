@@ -157,6 +157,11 @@ export default function SignInPage() {
         return;
       }
       setStep("mfa");
+    } else if (signIn.status === "pending") {
+      /* choose-organization 세션 태스크 미완료 상태:
+       * 사용자에게 조직이 없거나 Clerk 설정상 조직 선택이 필수일 때 발생.
+       * /select-org로 리다이렉트하여 TaskChooseOrganization 컴포넌트가 처리하게 함 */
+      router.push("/select-org");
     }
   }
 

@@ -4,6 +4,7 @@ import guidelinesRoute from "@/features/guidelines/backend/route";
 import generateRoute from "@/features/generate/backend/route";
 import contentsRoute from "@/features/content-versions/backend/route";
 import translationsRoute from "@/features/translations/backend/route";
+import orgRoute from "@/features/organizations/backend/route";
 
 let _app: Hono | null = null;
 
@@ -21,5 +22,6 @@ function createApp(): Hono {
   app.route("/generate", generateRoute);
   app.route("/contents", contentsRoute);
   app.route("/contents", translationsRoute);
+  app.route("/org", orgRoute);
   return app;
 }

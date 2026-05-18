@@ -12,6 +12,8 @@ import {
   PenLine,
   Settings,
   LogOut,
+  Building2,
+  CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -24,6 +26,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AccountManagementModal } from "@/components/layout/account-modal";
+import { OrgSwitcher } from "@/features/organizations/components/org-switcher";
+import { useOrganizations } from "@/features/organizations/hooks/use-organizations";
 
 type NavItem = {
   href: string;
@@ -33,11 +37,16 @@ type NavItem = {
   badge?: string;
 };
 
-const navItems: NavItem[] = [
+const baseNavItems: NavItem[] = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
   { href: "/generate", icon: Pencil, label: "콘텐츠 생성" },
   { href: "/guidelines", icon: BookOpen, label: "AI 지침 관리" },
   { href: "/history", icon: History, label: "생성 이력" },
+];
+
+const adminNavItems: NavItem[] = [
+  { href: "/org", icon: Building2, label: "조직 설정" },
+  { href: "/billing", icon: CreditCard, label: "결제·플랜", disabled: true },
 ];
 
 function SidebarUserButton() {
@@ -117,8 +126,46 @@ function SidebarUserButton() {
   );
 }
 
+function NavLink({
+  href,
+  icon: Icon,
+  label,
+  disabled,
+  badge,
+  pathname,
+  onNavClick,
+}: NavItem & { pathname: string; onNavClick?: () => void }) {
+  const isActive = pathname === href || pathname.startsWith(href + "/");
+  return (
+    <Link
+      href={disabled ? "#" : href}
+      aria-disabled={disabled}
+      onClick={(e) => {
+        if (disabled) e.preventDefault();
+        else onNavClick?.();
+      }}
+      className={cn(
+        "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors relative",
+        isActive
+          ? "bg-sidebar-accent text-foreground font-medium before:absolute before:left-0 before:top-1 before:bottom-1 before:w-0.5 before:bg-primary before:rounded-full"
+          : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/60",
+        disabled && "opacity-40 cursor-not-allowed pointer-events-none"
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className="flex-1">{label}</span>
+      {badge && <span className="text-xs text-muted-foreground">{badge}</span>}
+    </Link>
+  );
+}
+
 export function Sidebar({ onNavClick }: { onNavClick?: () => void }) {
   const pathname = usePathname();
+  const { data: orgs } = useOrganizations();
+
+  // 현재 활성 조직 기반으로 admin 여부 판단
+  const activeOrg = orgs?.find((o) => o.is_default) ?? orgs?.[0];
+  const isAdmin = activeOrg?.role === "admin";
 
   return (
     <aside className="flex flex-col h-full w-64 bg-sidebar border-r border-sidebar-border">
@@ -134,38 +181,30 @@ export function Sidebar({ onNavClick }: { onNavClick?: () => void }) {
         </Link>
       </div>
 
+      {/* 조직 스위처 */}
+      <div className="border-b border-sidebar-border py-2">
+        <OrgSwitcher onNavClick={onNavClick} />
+      </div>
+
       {/* 네비게이션 */}
       <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ href, icon: Icon, label, disabled, badge }) => {
-          const isActive =
-            pathname === href || pathname.startsWith(href + "/");
+        {baseNavItems.map((item) => (
+          <NavLink key={item.href} {...item} pathname={pathname} onNavClick={onNavClick} />
+        ))}
 
-          return (
-            <Link
-              key={href}
-              href={disabled ? "#" : href}
-              aria-disabled={disabled}
-              onClick={(e) => {
-                if (disabled) e.preventDefault();
-                else onNavClick?.();
-              }}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors relative",
-                isActive
-                  ? /* 활성: Sage Green 좌측 2px 보더 + Warm White 배경 */
-                    "bg-sidebar-accent text-foreground font-medium before:absolute before:left-0 before:top-1 before:bottom-1 before:w-0.5 before:bg-primary before:rounded-full"
-                  : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/60",
-                disabled && "opacity-40 cursor-not-allowed pointer-events-none"
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              <span className="flex-1">{label}</span>
-              {badge && (
-                <span className="text-xs text-muted-foreground">{badge}</span>
-              )}
-            </Link>
-          );
-        })}
+        {/* org:admin 전용 메뉴 */}
+        {isAdmin && (
+          <>
+            <div className="pt-3 pb-1 px-3">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                관리
+              </p>
+            </div>
+            {adminNavItems.map((item) => (
+              <NavLink key={item.href} {...item} pathname={pathname} onNavClick={onNavClick} />
+            ))}
+          </>
+        )}
       </nav>
 
       {/* 사용자 버튼 */}

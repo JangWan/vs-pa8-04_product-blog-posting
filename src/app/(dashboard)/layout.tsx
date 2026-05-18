@@ -1,5 +1,6 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { MobileHeader } from "@/components/layout/mobile-header";
+import { DeletedOrgBanner } from "@/components/layout/deleted-org-banner";
 import { Toaster } from "@/components/ui/sonner";
 
 export default function DashboardLayout({
@@ -18,6 +19,9 @@ export default function DashboardLayout({
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         {/* 모바일 헤더 (md 미만) */}
         <MobileHeader />
+
+        {/* soft-deleted 조직 경고 배너 */}
+        <DeletedOrgBanner />
 
         {/* 페이지 콘텐츠 — 공통 좌우 여백 및 상하 패딩 (모든 페이지 통일) */}
         <main className="flex-1 overflow-y-auto [scrollbar-gutter:stable] px-4 sm:px-6 lg:px-10 py-8">

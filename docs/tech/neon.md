@@ -317,6 +317,76 @@ migrations/
 
 ---
 
+## 트러블슈팅
+
+### `No transactions support in neon-http driver` 에러
+
+#### 증상
+
+```
+Error: No transactions support in neon-http driver
+    at db.transaction(async (tx) => { ... })
+```
+
+`db.transaction()` 호출 시 런타임에서 위 에러가 발생합니다.
+
+#### 원인
+
+`drizzle-orm/neon-http` 드라이버는 HTTP 기반 단일 요청으로 쿼리를 실행하므로 **다중 쿼리 트랜잭션을 지원하지 않습니다.**
+
+| 드라이버 | import | 트랜잭션 지원 |
+|---------|--------|--------------|
+| `drizzle-orm/neon-http` | `neon()` from `@neondatabase/serverless` | ❌ 미지원 |
+| `drizzle-orm/neon-serverless` | `Pool` from `@neondatabase/serverless` | ✅ 지원 |
+
+이 프로젝트(`src/db/index.ts`)는 Edge/serverless 환경 최적화를 위해 `neon-http` 드라이버를 사용합니다.
+
+#### 해결 — `db.batch()` 로 교체
+
+`neon-http` 드라이버는 `db.batch()`를 지원합니다. 배열로 전달된 쿼리들을 **단일 HTTP 요청으로 원자적 실행**합니다.
+
+```typescript
+// ❌ neon-http에서 사용 불가
+await db.transaction(async (tx) => {
+  await tx.insert(tableA).values({ ... });
+  await tx.insert(tableB).values({ ... });
+  await tx.update(tableC).set({ ... }).where(...);
+});
+
+// ✅ db.batch()로 교체 — 원자적 실행 보장
+await db.batch([
+  db.insert(tableA).values({ ... }),
+  db.insert(tableB).values({ ... }),
+  db.update(tableC).set({ ... }).where(...),
+]);
+```
+
+#### `db.batch()` 주의사항
+
+- 배열 내 각 쿼리는 **독립적인 Drizzle 쿼리 빌더** 객체여야 합니다 (`tx.` 접두사 제거).
+- 결과는 배열로 반환됩니다: `const [r1, r2, r3] = await db.batch([...])`
+- 중간 쿼리 결과를 다음 쿼리에 사용해야 하는 경우(종속 쿼리)에는 `batch` 사용 불가 → 순차 실행으로 처리합니다.
+
+#### 트랜잭션이 반드시 필요한 경우
+
+완전한 ACID 트랜잭션이 필요하면 드라이버를 `neon-serverless`로 변경합니다.
+
+```typescript
+// src/db/index.ts — 트랜잭션 필요 시
+import { Pool } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import * as schema from "./schema";
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
+export const db = drizzle(pool, { schema });
+// ⚠️ serverless 환경에서는 요청 종료 시 pool.end() 호출 필요
+```
+
+> Edge Runtime(Vercel Edge, Cloudflare Workers)에서는 WebSocket이 제한될 수 있으므로
+> `neon-serverless` 드라이버 사용 전 배포 환경 호환성을 반드시 확인하세요.
+
+---
+
 ## References
 
 | 문서 | URL |

@@ -175,6 +175,23 @@
 
 ---
 
+## 8. UC-23~27 — 조직(팀) 관리 Phase 3
+
+> 상세 진행 상태: `docs/Imple/progress-status-08.조직관리.md`
+
+| # | 항목 | 상태 | 비고 |
+|---|------|------|------|
+| 08-01 | DB 스키마 확장 (guidelines.organization_id, contents.organization_id) | ✅ 완료 | 마이그레이션 0004 |
+| 08-02 | Clerk Webhook 핸들러 확장 (Personal Org 자동 생성, 멤버 동기화) | ✅ 완료 | ON CONFLICT DO NOTHING |
+| 08-03 | 백엔드 미들웨어 + /api/org/* 전체 API (UC-23~27) | ✅ 완료 | withOrganization + withAdminRole |
+| 08-04 | 기존 API 조직 스코프 적용 (guidelines / history / generate) | ✅ 완료 | resolveOrg() + 백필 폴백 |
+| 08-05 | 부트스트랩 엔드포인트 + 실행 | ✅ 완료 | /api/admin/bootstrap-orgs |
+| 08-06 | 사이드바 — OrgSwitcher + 조직 캡션 + admin 전용 메뉴 | ✅ 완료 | |
+| 08-07 | 조직 관리 페이지 4개 (/org, /org/new, /org/[id], /org/[id]/members) | ✅ 완료 | |
+| 08-08 | DeletedOrgBanner — 대시보드 레이아웃 soft-delete 경고 | ✅ 완료 | |
+
+---
+
 ## 현재 진행 단계
 
 ```
@@ -186,8 +203,8 @@
 [완료] UC-10~14 지침 관리 (API + UI)
 [완료] UC-15~19 백엔드 + 프론트엔드 (콘텐츠 이력 관리)
 [완료] UC-20~22 백엔드 + 프론트엔드 (다국어 번역)
-[대기] 사용자 마이그레이션 실행 — content_translations 테이블 추가분
-[다음] Phase 3 (결제·조직 관리 등)
+[완료] UC-23~27 조직(팀) 관리 Phase 3 (전체)
+[다음] 결제·플랜 (Stripe) 또는 추가 UC
 ```
 
 ---

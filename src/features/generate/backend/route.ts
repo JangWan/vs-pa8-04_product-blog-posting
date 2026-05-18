@@ -3,12 +3,17 @@ import { z } from "zod";
 import { stream } from "hono/streaming";
 import { requireAuth } from "@/backend/middleware/clerk-auth";
 import { db } from "@/db";
-import { contents, guidelines, users } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { contents, guidelines, organizations, users } from "@/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
 import { ai, geminiModel } from "@/lib/gemini";
 import { buildSystemInstruction, extractSeoMeta } from "./service";
 
-const generateRoute = new Hono<{ Variables: { userId: string } }>();
+type Bindings = { userId: string | null; orgId: string | null };
+
+const generateRoute = new Hono<{
+  Variables: { userId: string };
+  Bindings: Bindings;
+}>();
 
 const generateSchema = z.object({
   topic: z.string().min(1).max(300),
@@ -20,6 +25,7 @@ const generateSchema = z.object({
 /* POST /api/generate/stream — AI 스트리밍 생성 */
 generateRoute.post("/stream", requireAuth, async (c) => {
     const clerkUserId = c.get("userId");
+    const clerkOrgId = (c.env as Bindings).orgId;
 
     const parsed = generateSchema.safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Invalid body" }, 400);
@@ -29,6 +35,18 @@ generateRoute.post("/stream", requireAuth, async (c) => {
       where: eq(users.clerk_user_id, clerkUserId),
     });
     if (!dbUser) return c.json({ error: "Unauthorized" }, 401);
+
+    // 활성 조직 조회 (organization_id 설정용)
+    let activeOrgId: string | null = null;
+    if (clerkOrgId) {
+      const org = await db.query.organizations.findFirst({
+        where: and(eq(organizations.clerk_org_id, clerkOrgId), isNull(organizations.deleted_at)),
+      });
+      activeOrgId = org?.id ?? null;
+    }
+    if (!activeOrgId && dbUser.default_organization_id) {
+      activeOrgId = dbUser.default_organization_id;
+    }
 
     /* 선택된 지침 내용 조회 */
     let guidelineContent = "";
@@ -84,6 +102,7 @@ generateRoute.post("/stream", requireAuth, async (c) => {
           .values({
             id: crypto.randomUUID(),
             user_id: dbUser.id,
+            organization_id: activeOrgId,
             guideline_id: resolvedGuidelineId,
             topic,
             keywords: keywords ?? [],

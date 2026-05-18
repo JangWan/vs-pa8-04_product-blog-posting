@@ -2,14 +2,51 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { requireAuth } from "@/backend/middleware/clerk-auth";
 import { db } from "@/db";
-import { contentVersions, contents, guidelines, users } from "@/db/schema";
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { contentVersions, contents, guidelines, organizations, users } from "@/db/schema";
+import { and, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import type { Organization } from "@/db/schema";
 
-const historyRoute = new Hono<{ Variables: { userId: string } }>();
+type Bindings = { userId: string | null; orgId: string | null };
+
+const historyRoute = new Hono<{
+  Variables: { userId: string };
+  Bindings: Bindings;
+}>();
+
+// ─── 헬퍼: 현재 활성 조직 조회 ───────────────────────────────────────────────
+
+async function resolveOrg(
+  dbUserId: string,
+  clerkOrgId: string | null | undefined
+): Promise<Organization | null> {
+  if (clerkOrgId) {
+    const org = await db.query.organizations.findFirst({
+      where: and(
+        eq(organizations.clerk_org_id, clerkOrgId),
+        isNull(organizations.deleted_at)
+      ),
+    });
+    if (org) return org;
+  }
+
+  const dbUser = await db.query.users.findFirst({
+    where: eq(users.id, dbUserId),
+  });
+  if (!dbUser?.default_organization_id) return null;
+
+  const fallback = await db.query.organizations.findFirst({
+    where: and(
+      eq(organizations.id, dbUser.default_organization_id),
+      isNull(organizations.deleted_at)
+    ),
+  });
+  return fallback ?? null;
+}
 
 /* GET /api/history?limit=N&cursor=<last_id> — 이력 목록 (커서 페이지네이션) */
 historyRoute.get("/", requireAuth, async (c) => {
   const clerkUserId = c.get("userId");
+  const clerkOrgId = (c.env as Bindings).orgId;
   const limit = Math.min(parseInt(c.req.query("limit") ?? "20") || 20, 100);
   const cursor = c.req.query("cursor") ?? null;
 
@@ -18,25 +55,30 @@ historyRoute.get("/", requireAuth, async (c) => {
   });
   if (!dbUser) return c.json({ data: [], next_cursor: null });
 
-  // 커서가 있으면 해당 id의 created_at 기준으로 그 이전 항목만 조회
+  const org = await resolveOrg(dbUser.id, clerkOrgId);
+
+  // 조직 스코프 필터 (백필 미완료 데이터 fallback 포함)
+  const orgFilter = org
+    ? or(
+        eq(contents.organization_id, org.id),
+        and(isNull(contents.organization_id), eq(contents.user_id, dbUser.id))
+      )
+    : eq(contents.user_id, dbUser.id);
+
   let beforeCreatedAt: Date | null = null;
   if (cursor) {
     const cursorRow = await db
       .select({ created_at: contents.created_at })
       .from(contents)
-      .where(and(eq(contents.id, cursor), eq(contents.user_id, dbUser.id)))
+      .where(and(eq(contents.id, cursor), orgFilter))
       .limit(1);
     if (cursorRow.length > 0) beforeCreatedAt = cursorRow[0].created_at;
   }
 
   const whereExpr = beforeCreatedAt
-    ? and(
-        eq(contents.user_id, dbUser.id),
-        lt(contents.created_at, beforeCreatedAt),
-      )
-    : eq(contents.user_id, dbUser.id);
+    ? and(orgFilter, lt(contents.created_at, beforeCreatedAt))
+    : orgFilter;
 
-  // limit + 1로 조회해서 다음 페이지 존재 여부 판단
   const rows = await db
     .select({
       id: contents.id,
@@ -61,12 +103,15 @@ historyRoute.get("/", requireAuth, async (c) => {
 /* GET /api/history/:id — 이력 단건 조회 (에디터·상세용) */
 historyRoute.get("/:id", requireAuth, async (c) => {
   const clerkUserId = c.get("userId");
+  const clerkOrgId = (c.env as Bindings).orgId;
   const id = c.req.param("id");
 
   const dbUser = await db.query.users.findFirst({
     where: eq(users.clerk_user_id, clerkUserId),
   });
   if (!dbUser) return c.json({ error: "Unauthorized" }, 401);
+
+  const org = await resolveOrg(dbUser.id, clerkOrgId);
 
   const rows = await db
     .select({
@@ -77,6 +122,7 @@ historyRoute.get("/:id", requireAuth, async (c) => {
       body: contents.body,
       seo_meta: contents.seo_meta,
       source_lang: contents.source_lang,
+      organization_id: contents.organization_id,
       created_at: contents.created_at,
       updated_at: contents.updated_at,
       guideline_title: guidelines.title,
@@ -90,10 +136,15 @@ historyRoute.get("/:id", requireAuth, async (c) => {
   if (rows.length === 0) return c.json({ error: "Not found" }, 404);
 
   const row = rows[0];
-  // BR-04: 타인 데이터 접근은 ID 노출 방지를 위해 404로 응답 (UC-15 §5-1)
-  if (row.user_id !== dbUser.id) return c.json({ error: "Not found" }, 404);
 
-  const { user_id: _omit, ...result } = row;
+  // 조직 소유권 검증 (BR-04: 타인 데이터 404)
+  const belongsToOrg = org && row.organization_id === org.id;
+  const belongsToUser = row.user_id === dbUser.id;
+  if (!belongsToOrg && !belongsToUser) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  const { user_id: _omit, organization_id: _omit2, ...result } = row;
   return c.json(result);
 });
 
@@ -102,6 +153,7 @@ const putBodySchema = z.object({ body: z.string().min(1) });
 /* PUT /api/history/:id — 에디터 수동 저장 (BR-17 + BR-18 자동 스냅샷) */
 historyRoute.put("/:id", requireAuth, async (c) => {
   const clerkUserId = c.get("userId");
+  const clerkOrgId = (c.env as Bindings).orgId;
   const id = c.req.param("id");
 
   const parsed = putBodySchema.safeParse(await c.req.json());
@@ -113,14 +165,21 @@ historyRoute.put("/:id", requireAuth, async (c) => {
   });
   if (!dbUser) return c.json({ error: "Unauthorized" }, 401);
 
+  const org = await resolveOrg(dbUser.id, clerkOrgId);
+
   const existing = await db.query.contents.findFirst({
-    where: and(eq(contents.id, id), eq(contents.user_id, dbUser.id)),
+    where: eq(contents.id, id),
   });
   if (!existing) return c.json({ error: "Not found" }, 404);
 
-  /* BR-18: 본문이 실제로 바뀐 경우에만 직전 본문을 자동 스냅샷.
-     동일 본문이면 스냅샷 생략(중복 방지). BR-20 초과 시 자동 스냅샷은 건너뛰고
-     편집 자체는 허용 — 수동 스냅샷 시에만 명시적 400을 반환한다. */
+  // 소유권 검증
+  const belongsToOrg = org && existing.organization_id === org.id;
+  const belongsToUser = existing.user_id === dbUser.id;
+  if (!belongsToOrg && !belongsToUser) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  /* BR-18: 본문이 실제로 바뀐 경우에만 직전 본문을 자동 스냅샷 */
   if (existing.body !== body) {
     const prevBytes = Buffer.byteLength(existing.body, "utf8");
     if (prevBytes <= 100 * 1024) {
@@ -152,6 +211,7 @@ historyRoute.put("/:id", requireAuth, async (c) => {
 /* DELETE /api/history/:id — 이력 삭제 (UC-15 §4-1, BR-24 CASCADE) */
 historyRoute.delete("/:id", requireAuth, async (c) => {
   const clerkUserId = c.get("userId");
+  const clerkOrgId = (c.env as Bindings).orgId;
   const id = c.req.param("id");
 
   const dbUser = await db.query.users.findFirst({
@@ -159,10 +219,18 @@ historyRoute.delete("/:id", requireAuth, async (c) => {
   });
   if (!dbUser) return c.json({ error: "Unauthorized" }, 401);
 
+  const org = await resolveOrg(dbUser.id, clerkOrgId);
+
   const existing = await db.query.contents.findFirst({
-    where: and(eq(contents.id, id), eq(contents.user_id, dbUser.id)),
+    where: eq(contents.id, id),
   });
   if (!existing) return c.json({ error: "Not found" }, 404);
+
+  const belongsToOrg = org && existing.organization_id === org.id;
+  const belongsToUser = existing.user_id === dbUser.id;
+  if (!belongsToOrg && !belongsToUser) {
+    return c.json({ error: "Not found" }, 404);
+  }
 
   await db.delete(contents).where(eq(contents.id, id));
   return c.json({ success: true });
