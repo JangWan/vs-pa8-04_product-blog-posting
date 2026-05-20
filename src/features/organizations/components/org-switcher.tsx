@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useClerk, useAuth } from "@clerk/nextjs";
+import { useQueryClient } from "@tanstack/react-query";
 import { Building2, ChevronDown, Plus, Check } from "lucide-react";
 import {
   DropdownMenu,
@@ -12,7 +12,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
 import { useOrganizations } from "../hooks/use-organizations";
 
 type Props = {
@@ -24,15 +23,17 @@ export function OrgSwitcher({ onNavClick }: Props) {
   const { setActive } = useClerk();
   const { orgId: activeClerkOrgId } = useAuth();
   const { data: orgs, isLoading } = useOrganizations();
+  const qc = useQueryClient();
 
   // 현재 활성 조직
   const activeOrg = orgs?.find((o) => o.clerk_org_id === activeClerkOrgId)
-    ?? orgs?.find((o) => o.is_default)
+    ?? orgs?.find((o) => o.is_last_active)
     ?? orgs?.[0];
 
-  // 조직 전환
+  // 조직 전환 — billing 쿼리 즉시 무효화하여 사이드바 구독 정보 갱신
   const handleSwitch = async (clerkOrgId: string) => {
     await setActive({ organization: clerkOrgId });
+    void qc.invalidateQueries({ queryKey: ["billing"] });
     onNavClick?.();
     router.refresh();
   };
@@ -47,7 +48,7 @@ export function OrgSwitcher({ onNavClick }: Props) {
 
   if (!activeOrg) return null;
 
-  const isPersonal = activeOrg.is_personal;
+  const isPersonal = activeOrg.is_default;
   const isSoftDeleted = !!activeOrg.deleted_at;
 
   const caption = isSoftDeleted
@@ -72,7 +73,7 @@ export function OrgSwitcher({ onNavClick }: Props) {
                 </span>
                 {isPersonal && (
                   <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 shrink-0">
-                    개인
+                    기본
                   </Badge>
                 )}
               </div>
@@ -90,9 +91,9 @@ export function OrgSwitcher({ onNavClick }: Props) {
             >
               <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span className="flex-1 truncate text-sm">{org.name}</span>
-              {org.is_personal && (
+              {org.is_default && (
                 <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">
-                  개인
+                  기본
                 </Badge>
               )}
               {org.clerk_org_id === activeClerkOrgId && (

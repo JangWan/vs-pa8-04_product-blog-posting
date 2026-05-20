@@ -14,9 +14,9 @@ import {
   LogOut,
 } from "lucide-react";
 import { format } from "date-fns";
-import { clerkErrorToKorean } from "@/lib/clerk-errors";
 import { ko } from "date-fns/locale";
 import { useSessionInfo } from "@/features/user-profile/hooks/use-session-info";
+import { useDeleteAccount } from "@/features/billing/hooks/use-billing";
 
 /* user.getSessions()의 실제 반환 형태 — SessionWithActivitiesResource */
 type SessionWithActivity = {
@@ -37,6 +37,7 @@ export function AccountInfoTab() {
   const { session: currentSession } = useSession();
   const router = useRouter();
   const { ip, os, browser, isLoading: sessionInfoLoading } = useSessionInfo();
+  const deleteAccount = useDeleteAccount();
 
   const [sessions, setSessions] = useState<SessionWithActivity[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
@@ -78,7 +79,7 @@ export function AccountInfoTab() {
     }
   }
 
-  /* ── 계정 삭제 ── */
+  /* ── 계정 삭제 (H-06: DELETE /api/user → 구독·팀 정리 후 Clerk 삭제) ── */
   async function handleDelete() {
     if (!user) return;
     if (deleteConfirm !== "계정삭제") {
@@ -88,12 +89,16 @@ export function AccountInfoTab() {
     setDeleteLoading(true);
     setDeleteError("");
     try {
-      await user.delete();
+      await deleteAccount.mutateAsync();
       await signOut();
       router.replace("/");
     } catch (err: unknown) {
-      const code = (err as { errors?: { code: string }[] })?.errors?.[0]?.code;
-      setDeleteError(code ? clerkErrorToKorean(code) : "계정 삭제에 실패했습니다. 잠시 후 다시 시도해주세요.");
+      const message = (err as Error).message ?? "";
+      if (message.includes("ADMIN_HANDOFF_REQUIRED")) {
+        setDeleteError("다른 팀 관리자를 지정하거나 팀을 삭제한 후 다시 시도하세요.");
+      } else {
+        setDeleteError(message || "계정 삭제에 실패했습니다. 잠시 후 다시 시도해주세요.");
+      }
       setDeleteLoading(false);
     }
   }
@@ -230,9 +235,16 @@ export function AccountInfoTab() {
         <div className="space-y-3">
           <div className="flex items-start gap-2.5 p-3 rounded-md bg-red-50 border border-red-100">
             <ShieldAlert className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
-            <p className="text-sm text-red-600">
-              계정을 삭제하면 모든 데이터가 영구 삭제되며 복구할 수 없습니다.
-            </p>
+            <div className="space-y-1">
+              <p className="text-sm text-red-600">
+                계정을 삭제하면 모든 데이터가 영구 삭제되며 복구할 수 없습니다.
+              </p>
+              <p className="text-xs text-red-500">
+                활성 구독은 현재 기간 만료 시 자동 해지됩니다.
+                혼자인 팀은 즉시 삭제됩니다.
+                다른 멤버가 있는 팀의 관리자라면 먼저 관리자를 이전하세요.
+              </p>
+            </div>
           </div>
           <div>
             <label className="block text-xs text-muted-foreground mb-1">

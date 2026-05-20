@@ -62,10 +62,12 @@ export function MembersTab({ org }: Props) {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
 
-  const isPersonal = org.is_personal;
-  const maxMembers = org.plan === "pro" ? 3 : 1;
+  const isPersonal = org.is_default;
+  // Phase 6: plan_product_id 유무로 유료 여부 판단 (서버에서 validateInviteCapacity로 상한 검증)
+  const hasActivePlan = !!org.plan_product_id;
   const currentCount = memberData?.members.length ?? 0;
-  const atLimit = currentCount >= maxMembers;
+  const atLimit = !hasActivePlan && currentCount >= 1;
+  const maxMembersLabel = hasActivePlan ? "무제한" : "1";
 
   const handleInvite = async () => {
     await invite.mutateAsync({ email: inviteEmail, role: inviteRole });
@@ -76,12 +78,23 @@ export function MembersTab({ org }: Props) {
 
   if (isLoading) return <Skeleton className="h-48 rounded-xl" />;
 
+  // 기본 팀(개인 워크스페이스)은 멤버 관리 기능 없음
+  if (isPersonal) {
+    return (
+      <div className="py-10 text-center text-sm text-muted-foreground">
+        기본 팀은 멤버 관리 기능이 없습니다.
+        <br />
+        기본 팀은 본인만 사용하는 개인 워크스페이스입니다.
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* 헤더 — 멤버 수 + 초대 버튼 */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          {currentCount}/{maxMembers}명
+          {currentCount}/{maxMembersLabel}명
         </p>
 
         {!isPersonal ? (
@@ -130,7 +143,7 @@ export function MembersTab({ org }: Props) {
                   </RadioGroup>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  현재 {currentCount}/{maxMembers}명 가입 중
+                  현재 {currentCount}/{maxMembersLabel}명 가입 중
                 </p>
               </div>
               <DialogFooter>

@@ -1,6 +1,6 @@
 # 구현 진행 상태 — IndiePost AI
 
-> 마지막 업데이트: 2026-05-17
+> 마지막 업데이트: 2026-05-20
 > 참조: docs/usecase/usecase-common.md §0 (전체 UC 목록)
 
 ---
@@ -192,6 +192,79 @@
 
 ---
 
+## 9. UC-28~33, UC-38 — 결제·구독 관리 Phase 3
+
+> 상세 진행 상태: `docs/Imple/progress-status-09.결제.md`
+
+| # | 항목 | 상태 | 비고 |
+|---|------|------|------|
+| 09-01 | DB 스키마 10개 테이블 (subscriptions, orders, payments 등) | ✅ 완료 | 마이그레이션 0005 |
+| 09-02 | src/lib/toss.ts — tossRequest() 래퍼 (BR-35-d) | ✅ 완료 | REQ/RES/ERR 감사 로그 자동 |
+| 09-03 | billing/backend/constants.ts — 11개 상태 + 5개 가드 + 플랜 정의 | ✅ 완료 | |
+| 09-04 | billing/backend/billing-key.ts — AES-256-GCM 암호화 (BR-35) | ✅ 완료 | |
+| 09-05 | billing/backend/service.ts — confirmTossPayment, activateSubscription | ✅ 완료 | |
+| 09-06 | billing/backend/route.ts — 14개 엔드포인트 (GET plans/subscription/usage 등) | ✅ 완료 | |
+| 09-07 | /api/webhooks/toss — Toss Webhook (BR-37 항상 200, 멱등성) | ✅ 완료 | |
+| 09-08 | /api/cron/billing/tick — QStash 정기결제 (BR-36 past_due) | ✅ 완료 | |
+| 09-09 | /api/cron/billing/expire-orders — 만료 주문 처리 | ✅ 완료 | |
+| 09-10 | /api/cron/billing/finalize-canceled — 해지 완결 + 빌링키 파기 (BR-39) | ✅ 완료 | |
+| 09-11 | billing/hooks/use-billing.ts — TanStack Query 훅 (전체) | ✅ 완료 | |
+| 09-12 | /billing — 플랜 비교 + 구독 상태 카드 + past_due 배너 (UC-31·38) | ✅ 완료 | |
+| 09-13 | /billing/checkout — 주문 생성 + 30분 카운트다운 + Toss SDK | ✅ 완료 | UC-28 §3~7 |
+| 09-14 | /billing/checkout/result — 성공(confetti)/실패/가상계좌 3분기 (UC-33) | ✅ 완료 | useRef 가드 confirm 1회 |
+| 09-15 | /billing/payments — 결제 이력 테이블 + 11상태 뱃지 | ✅ 완료 | |
+| 09-16 | /billing/payments/[paymentKey] — 결제 단건 + 환불 요청 폼 (UC-32) | ✅ 완료 | |
+| 09-17 | PastDueBanner — 대시보드 레이아웃 past_due 빨강 배너 (admin, BR-36) | ✅ 완료 | |
+| 09-18 | 사이드바 — 플랜 뱃지 + 사용량 progress bar + 업그레이드 버튼 (Free) | ✅ 완료 | IA §v1.4 |
+
+---
+
+## 10. 빌링 DB 재설계 — Phase 5 (플랜 상품화 + 구독 이력 체계화)
+
+> 상세 진행 상태: `docs/Imple/progress-status-09.빌링-DB-재설계.md`
+
+| # | 항목 | 상태 | 비고 |
+|---|------|------|------|
+| 10-01 | plan_products 테이블 신설 + 시드 데이터 5행 | ✅ 완료 | 마이그레이션 0010 |
+| 10-02 | subscription_history 테이블 신설 | ✅ 완료 | 4개 인덱스, organization_id 역정규화 |
+| 10-03 | 기존 5개 테이블 컬럼 추가 (card_last4, source, plan_product_id 등) | ✅ 완료 | 제거 없음 — Phase 6에서 정리 |
+| 10-04 | SUBSCRIPTION_HISTORY_KIND 상수 + 타입 추가 | ✅ 완료 | src/lib/constants.ts |
+| 10-05 | recordBillingEvent() 함수 신설 | ✅ 완료 | service.ts |
+| 10-06 | syncOrgPlan() — plan + plan_product_id 동시 갱신 | ✅ 완료 | service.ts |
+| 10-07 | updateBillingKey() — 빌링키 교체 = 새 subscription 행 생성 | ✅ 완료 | service.ts |
+| 10-08 | activateSubscription() — card_last4/company 저장 + 'activated'/'resubscribed' 이벤트 | ✅ 완료 | service.ts |
+| 10-09 | cron/tick — next_billing_at 드리프트 버그 수정 (current_period_end 기준) | ✅ 완료 | |
+| 10-10 | cron/tick — 'renewed'/'downgraded' subscription_history 이벤트 + source='cron' | ✅ 완료 | |
+| 10-11 | route.ts — GET /payments SQL 최적화 (inArray + JOIN) | ✅ 완료 | 풀스캔 제거 |
+| 10-12 | route.ts — GET /plan-products, GET /subscription-history 엔드포인트 신설 | ✅ 완료 | |
+| 10-13 | route.ts — GET /subscription card_display 추가, POST /orders source:'user' | ✅ 완료 | |
+| 10-14 | /billing — card_display 카드 정보 표시 + BillingEventCard (subscription_history 기반) | ✅ 완료 | |
+| 10-15 | /billing/checkout — PlanSelector DB 조회 전환 (usePlanProducts + fallback) | ✅ 완료 | |
+| 10-16 | /billing/payments — order_kind + plan_code 플랜명 컨텍스트 표시 | ✅ 완료 | |
+| 10-17 | A-9 백필 SQL 전체 실행 (plan_products 시드 포함) | ✅ 완료 | Neon Console에서 직접 실행 |
+
+---
+
+## 11. 빌링 Phase 6 — 레거시 `plan` 컬럼 전면 제거
+
+> 상세 진행 상태: `docs/Imple/progress-status-09.빌링-Phase6-플랜컬럼제거.md`
+
+| # | 항목 | 상태 | 비고 |
+|---|------|------|------|
+| 11-01 | DB 스키마 — `subscriptions` 레거시 8개 컬럼 제거 + `plan_product_id` 추가 | ✅ 완료 | plan, scheduled_plan, override_*, upgraded_* 제거 |
+| 11-02 | DB 스키마 — `organizations.plan` 제거 | ✅ 완료 | plan_product_id는 Phase 5에서 이미 추가 |
+| 11-03 | DB 스키마 — `order_items.plan_code` 제거 | ✅ 완료 | plan_product_id FK로 대체 |
+| 11-04 | `PLANS` 상수 제거 (constants.ts) | ✅ 완료 | plan_products 테이블로 완전 이관 |
+| 11-05 | service.ts 전면 재작성 (plan_products JOIN 기반) | ✅ 완료 | syncOrgPlan/resolveEffectiveLimits/upgradeSubscription 등 |
+| 11-06 | cron/tick 재작성 — pending_plan_product_id + DB 가격 조회 | ✅ 완료 | override_* 초기화 코드 제거 |
+| 11-07 | billing/route.ts — plan_products JOIN + current_plan 응답 | ✅ 완료 | GET /subscription·/orders·/payments |
+| 11-08 | 프론트엔드 타입 정리 (OrgItem, Subscription) | ✅ 완료 | plan → plan_product_id |
+| 11-09 | 사이드바 plan 문자열 참조 제거 | ✅ 완료 | current_plan (subData) 기반으로 전환 |
+| 11-10 | 백필 SQL 실행 + 마이그레이션 완료 | ✅ 완료 | Neon Console + drizzle-kit migrate |
+| 11-11 | pnpm type-check 통과 | ✅ 완료 | |
+
+---
+
 ## 현재 진행 단계
 
 ```
@@ -204,7 +277,19 @@
 [완료] UC-15~19 백엔드 + 프론트엔드 (콘텐츠 이력 관리)
 [완료] UC-20~22 백엔드 + 프론트엔드 (다국어 번역)
 [완료] UC-23~27 조직(팀) 관리 Phase 3 (전체)
-[다음] 결제·플랜 (Stripe) 또는 추가 UC
+[완료] UC-28~33, UC-38 결제·구독 관리 Phase 3 (전체)
+[완료] 빌링 DB 재설계 Phase 5 — 플랜 상품화 + 구독 이력 체계화
+  [완료] plan_products 테이블 + 시드 데이터
+  [완료] subscription_history 테이블 + 백필
+  [완료] 빌링키 교체 = 새 subscription 행 생성 (updateBillingKey 재작성)
+  [완료] cron drift 버그 수정 + 이벤트 기록
+  [완료] GET /payments 풀스캔 제거 + 플랜 컨텍스트 JOIN
+  [완료] /billing card_display + BillingEventCard
+  [완료] /billing/checkout DB 기반 플랜 조회
+  [완료] /billing/payments 주문 컨텍스트 + 플랜명 표시
+[완료] 빌링 Phase 6 — 레거시 plan 컬럼 전면 제거
+  → docs/Imple/progress-status-09.빌링-Phase6-플랜컬럼제거.md
+[다음] 다음 작업 미정
 ```
 
 ---

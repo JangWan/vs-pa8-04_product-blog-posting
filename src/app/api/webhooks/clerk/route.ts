@@ -2,8 +2,11 @@ import { Webhook } from "svix";
 import { headers } from "next/headers";
 import { clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/db";
-import { users, organizations, organizationMembers, webhookEvents } from "@/db/schema";
-import { eq, and, isNull } from "drizzle-orm";
+import { users, organizations, organizationMembers, subscriptions, webhookEvents } from "@/db/schema";
+import { eq, and, sql, ne } from "drizzle-orm";
+import { ensurePersonalOrg } from "@/features/organizations/backend/ensure-personal-org";
+import { recordSubscriptionHistory } from "@/features/billing/backend/service";
+import { SUBSCRIPTION_STATUS, SUBSCRIPTION_HISTORY_REASON, type SubscriptionStatus } from "@/lib/constants";
 
 // ─── 이벤트 타입 정의 ───────────────────────────────────────────────────────
 
@@ -35,8 +38,14 @@ type OrgMembershipDeletedEvent = {
   };
 };
 
+type UserDeletedEvent = {
+  type: "user.deleted";
+  data: { id: string; deleted: boolean };
+};
+
 type WebhookEvent =
   | UserCreatedEvent
+  | UserDeletedEvent
   | OrgMembershipCreatedEvent
   | OrgMembershipDeletedEvent
   | { type: string; data: unknown };
@@ -62,76 +71,6 @@ async function checkAndRecordEvent(
   }
 }
 
-// ─── Personal Org 자동 생성 (UC-02 가입 후속, BR-31) ─────────────────────────
-// ON CONFLICT DO NOTHING + DB unique index로 중복 생성 차단
-
-async function createPersonalOrg(userId: string, email: string): Promise<void> {
-  // 이미 Personal Org가 있으면 스킵
-  const existing = await db.query.organizations.findFirst({
-    where: and(
-      eq(organizations.owner_user_id, userId),
-      eq(organizations.is_personal, true),
-      isNull(organizations.deleted_at)
-    ),
-  });
-  if (existing) {
-    if (!users) return; // 타입 가드
-    // default_organization_id만 보정
-    await db
-      .update(users)
-      .set({ default_organization_id: existing.id })
-      .where(and(eq(users.id, userId), isNull(users.default_organization_id)));
-    return;
-  }
-
-  const orgName = `${email.split("@")[0]}'s Workspace`;
-  const slug = `personal-${crypto.randomUUID().slice(0, 8)}`;
-
-  // Clerk Organization 생성
-  const client = await clerkClient();
-  const clerkOrg = await client.organizations.createOrganization({
-    name: orgName,
-    slug,
-    createdBy: undefined, // 시스템 생성
-    privateMetadata: {
-      idempotency_key: `personal-${userId}`,
-      is_personal: true,
-    },
-  });
-
-  const orgId = crypto.randomUUID();
-  const memberId = crypto.randomUUID();
-
-  // DB INSERT — neon-http는 transaction 미지원, batch로 원자적 실행
-  await db.batch([
-    db
-      .insert(organizations)
-      .values({
-        id: orgId,
-        clerk_org_id: clerkOrg.id,
-        name: orgName,
-        slug: clerkOrg.slug ?? slug,
-        owner_user_id: userId,
-        plan: "free",
-        is_personal: true,
-      })
-      .onConflictDoNothing(),
-    db
-      .insert(organizationMembers)
-      .values({
-        id: memberId,
-        organization_id: orgId,
-        user_id: userId,
-        role: "admin",
-        invited_by: null,
-      })
-      .onConflictDoNothing(),
-    db
-      .update(users)
-      .set({ default_organization_id: orgId })
-      .where(eq(users.id, userId)),
-  ]);
-}
 
 // ─── 메인 핸들러 ──────────────────────────────────────────────────────────────
 
@@ -207,13 +146,13 @@ export async function POST(req: Request) {
       return Response.json({ ok: true });
     }
 
-    // Personal Org 자동 생성 (BR-31)
+    // 기본 팀(Personal Org) 자동 생성 (BR-31)
     try {
-      await createPersonalOrg(dbUser.id, email);
+      await ensurePersonalOrg(dbUser.id, email, clerkUserId);
     } catch (err) {
       // 실패해도 webhook은 200 반환 (svix가 재시도하지 않도록)
-      // 다음 /dashboard 진입 시 미들웨어 보상 트랜잭션이 재시도
-      console.error("[webhook] Personal Org 생성 실패:", err);
+      // 다음 GET /api/org 요청 시 보상 트랜잭션이 재시도
+      console.error("[webhook] 기본 팀 생성 실패:", err);
     }
   }
 
@@ -246,6 +185,11 @@ export async function POST(req: Request) {
           invited_by: null,
         })
         .onConflictDoNothing();
+
+      // E-05: member_count 증가
+      await db.update(organizations)
+        .set({ member_count: sql`${organizations.member_count} + 1` })
+        .where(eq(organizations.id, org.id));
     }
   }
 
@@ -275,6 +219,47 @@ export async function POST(req: Request) {
             eq(organizationMembers.user_id, user.id)
           )
         );
+
+      // E-06: member_count 감소 (GREATEST 0 보장)
+      await db.update(organizations)
+        .set({ member_count: sql`GREATEST(${organizations.member_count} - 1, 0)` })
+        .where(eq(organizations.id, org.id));
+
+      // E-04: 탈퇴자가 팀 결제자인 경우 payer_warning=true
+      const [payerSub] = await db.select({ id: subscriptions.id, status: subscriptions.status })
+        .from(subscriptions)
+        .where(and(
+          eq(subscriptions.organization_id, org.id),
+          eq(subscriptions.payer_user_id, user.id),
+          ne(subscriptions.status, SUBSCRIPTION_STATUS.CANCELED),
+        ))
+        .limit(1);
+
+      if (payerSub) {
+        await db.update(subscriptions)
+          .set({ payer_warning: true })
+          .where(eq(subscriptions.id, payerSub.id));
+
+        await recordSubscriptionHistory({
+          subscriptionId: payerSub.id,
+          fromStatus: payerSub.status as SubscriptionStatus,
+          toStatus: payerSub.status as SubscriptionStatus,
+          fromPayerUserId: user.id,
+          changedBy: user.id,
+          reason: SUBSCRIPTION_HISTORY_REASON.PAYER_LEFT,
+        });
+      }
+    }
+  }
+
+  // ── user.deleted — DB 사용자 레코드 삭제 (cascade로 연관 데이터 정리) ─────────
+  if (evt.type === "user.deleted") {
+    const { id: clerkUserId } = (evt as UserDeletedEvent).data;
+    const dbUser = await db.query.users.findFirst({
+      where: eq(users.clerk_user_id, clerkUserId),
+    });
+    if (dbUser) {
+      await db.delete(users).where(eq(users.id, dbUser.id));
     }
   }
 

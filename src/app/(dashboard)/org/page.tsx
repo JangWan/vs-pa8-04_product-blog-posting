@@ -79,11 +79,11 @@ export default function OrgListPage() {
                         <p className="text-xs text-muted-foreground mt-0.5">/{org.slug}</p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-                        {org.is_personal && (
+                        {org.is_default && (
                           <Badge variant="outline" className="text-[10px]">개인</Badge>
                         )}
                         <Badge variant="secondary" className="text-[10px] capitalize">
-                          {org.plan}
+                          {org.plan_product_id ? "유료" : "free"}
                         </Badge>
                         <Badge variant={org.role === "admin" ? "default" : "outline"} className="text-[10px]">
                           {org.role === "admin" ? "관리자" : "멤버"}

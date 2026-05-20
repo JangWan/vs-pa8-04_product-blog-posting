@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       const existingOrg = await db.query.organizations.findFirst({
         where: and(
           eq(organizations.owner_user_id, user.id),
-          eq(organizations.is_personal, true),
+          eq(organizations.is_default, true),
           isNull(organizations.deleted_at)
         ),
       });
@@ -74,8 +74,7 @@ export async function POST(req: NextRequest) {
               name: orgName,
               slug,
               owner_user_id: user.id,
-              plan: "free",
-              is_personal: true,
+              is_default: true,
             })
             .onConflictDoNothing(),
           db

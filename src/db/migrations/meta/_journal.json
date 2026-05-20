@@ -36,6 +36,55 @@
       "when": 1779087123831,
       "tag": "0004_common_daimon_hellstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779095405853,
+      "tag": "0005_complex_luminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779149118343,
+      "tag": "0006_familiar_brother_voodoo",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779156672823,
+      "tag": "0007_many_demogoblin",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1747699200000,
+      "tag": "0008_rename_is_personal_to_is_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779174327134,
+      "tag": "0009_young_luckman",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779250566920,
+      "tag": "0010_worried_layla_miller",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779261553144,
+      "tag": "0011_hesitant_marvel_apes",
+      "breakpoints": true
     }
   ]
 }

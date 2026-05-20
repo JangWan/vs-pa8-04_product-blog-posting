@@ -6,6 +6,7 @@ import { requireAuth } from "@/backend/middleware/clerk-auth";
 import { requireContentOwner } from "@/backend/middleware/content-owner";
 import { db } from "@/db";
 import { contentTranslations, contents } from "@/db/schema";
+import { checkQuota, incrementQuota } from "@/features/billing/backend/service";
 import { ai, geminiModel } from "@/lib/gemini";
 import {
   buildTranslationInstruction,
@@ -214,6 +215,19 @@ translationsRoute.post(
       });
     }
 
+    // G-03: 번역 한도 체크 (스트림 시작 전)
+    if (content.organization_id) {
+      const quota = await checkQuota(content.organization_id, "translations");
+      if (!quota.allowed) {
+        return c.json({
+          error: "QUOTA_EXCEEDED",
+          message: `이번 달 번역 한도(${quota.limit}회)를 초과했습니다.`,
+          used: quota.used,
+          limit: quota.limit,
+        }, 429);
+      }
+    }
+
     const seoMetaSource = (content.seo_meta ?? {
       title: "",
       description: "",
@@ -266,6 +280,11 @@ translationsRoute.post(
             ),
           )
           .returning({ id: contentTranslations.id });
+
+        // G-03: 성공 후 번역 사용량 증가
+        if (content.organization_id) {
+          await incrementQuota(content.organization_id, "translations").catch(() => {});
+        }
 
         await s.write(
           `[DONE]${JSON.stringify({

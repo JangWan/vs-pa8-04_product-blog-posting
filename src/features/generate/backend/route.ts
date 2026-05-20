@@ -7,6 +7,7 @@ import { contents, guidelines, organizations, users } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { ai, geminiModel } from "@/lib/gemini";
 import { buildSystemInstruction, extractSeoMeta } from "./service";
+import { checkQuota, incrementQuota } from "@/features/billing/backend/service";
 
 type Bindings = { userId: string | null; orgId: string | null };
 
@@ -65,6 +66,19 @@ generateRoute.post("/stream", requireAuth, async (c) => {
       }
     }
 
+    // G-02: 생성 한도 체크 (스트림 시작 전)
+    if (activeOrgId) {
+      const quota = await checkQuota(activeOrgId, "generations");
+      if (!quota.allowed) {
+        return c.json({
+          error: "QUOTA_EXCEEDED",
+          message: `이번 달 AI 생성 한도(${quota.limit}회)를 초과했습니다.`,
+          used: quota.used,
+          limit: quota.limit,
+        }, 429);
+      }
+    }
+
     const systemInstruction = buildSystemInstruction(guidelineContent);
 
     /* 사용자 프롬프트 조합 */
@@ -111,6 +125,11 @@ generateRoute.post("/stream", requireAuth, async (c) => {
             seo_meta: seoMeta,
           })
           .returning({ id: contents.id });
+
+        // G-02: 성공 후 사용량 증가
+        if (activeOrgId) {
+          await incrementQuota(activeOrgId, "generations").catch(() => {});
+        }
 
         /* [DONE] 청크로 ID 전송 — 클라이언트가 감지 후 리다이렉트 */
         await s.write(

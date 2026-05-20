@@ -8,12 +8,15 @@ export type OrgItem = {
   clerk_org_id: string;
   name: string;
   slug: string;
-  plan: string;
-  is_personal: boolean;
+  /** Phase 6: plan 컬럼 제거 → plan_product_id FK */
+  plan_product_id: string | null;
+  /** 기본 팀(Personal Org) 영구 플래그 */
+  is_default: boolean;
   deleted_at: string | null;
   role: "admin" | "member";
   member_count: number;
-  is_default: boolean;
+  /** 사용자의 마지막 활성 조직 여부 (users.default_organization_id 기반) */
+  is_last_active: boolean;
 };
 
 export type OrgDetail = OrgItem & { role: "admin" | "member" };

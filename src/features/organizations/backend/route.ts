@@ -2,10 +2,13 @@ import { Hono } from "hono";
 import { clerkClient } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { organizations, organizationMembers, users } from "@/db/schema";
-import { eq, and, isNull, count } from "drizzle-orm";
+import { organizations, organizationMembers, subscriptions, users } from "@/db/schema";
+import { eq, and, isNull, isNotNull, count, ne } from "drizzle-orm";
 import { withOrganization } from "../middleware/with-organization";
 import { withAdminRole } from "../middleware/with-admin-role";
+import { ensurePersonalOrg } from "./ensure-personal-org";
+import { recordSubscriptionHistory, validateInviteCapacity } from "@/features/billing/backend/service";
+import { SUBSCRIPTION_STATUS, SUBSCRIPTION_HISTORY_REASON, type SubscriptionStatus } from "@/lib/constants";
 
 type Bindings = { userId: string | null; orgId: string | null };
 
@@ -32,11 +35,33 @@ app.get("/", async (c) => {
   const dbUser = await getDbUser(clerkUserId);
   if (!dbUser) return c.json({ error: "User not found" }, 404);
 
-  const memberships = await db
+  let memberships = await db
     .select({ org: organizations, member: organizationMembers })
     .from(organizationMembers)
     .innerJoin(organizations, eq(organizationMembers.organization_id, organizations.id))
     .where(eq(organizationMembers.user_id, dbUser.id));
+
+  // 보상 트랜잭션: is_default=true 조직이 없으면 기본 팀 자동 생성
+  const hasPersonalOrg = memberships.some(({ org }) => org.is_default);
+  if (!hasPersonalOrg) {
+    try {
+      await ensurePersonalOrg(dbUser.id, dbUser.email, clerkUserId);
+      // 생성 후 목록 재조회
+      memberships = await db
+        .select({ org: organizations, member: organizationMembers })
+        .from(organizationMembers)
+        .innerJoin(organizations, eq(organizationMembers.organization_id, organizations.id))
+        .where(eq(organizationMembers.user_id, dbUser.id));
+    } catch (err) {
+      // 생성 실패해도 기존 목록으로 응답 (다음 요청에서 재시도)
+      console.error("[GET /api/org] 기본 팀 자동 생성 실패:", err);
+    }
+  }
+
+  // default_organization_id가 유효하지 않으면 is_default=true 조직으로 보정
+  const updatedUser = await db.query.users.findFirst({
+    where: eq(users.clerk_user_id, clerkUserId),
+  }) ?? dbUser;
 
   const memberCounts = await db
     .select({
@@ -53,12 +78,12 @@ app.get("/", async (c) => {
     clerk_org_id: org.clerk_org_id,
     name: org.name,
     slug: org.slug,
-    plan: org.plan,
-    is_personal: org.is_personal,
+    plan_product_id: org.plan_product_id,
+    is_default: org.is_default,
     deleted_at: org.deleted_at,
     role: member.role,
     member_count: countMap.get(org.id) ?? 0,
-    is_default: org.id === dbUser.default_organization_id,
+    is_last_active: org.id === updatedUser.default_organization_id,
   }));
 
   return c.json({ data });
@@ -128,8 +153,7 @@ app.post("/", async (c) => {
       name,
       slug: clerkOrg.slug ?? finalSlug,
       owner_user_id: dbUser.id,
-      plan: "free",
-      is_personal: false,
+      is_default: false,
     }),
     db.insert(organizationMembers).values({
       id: memberId,
@@ -180,8 +204,8 @@ app.get("/:id", async (c) => {
     clerk_org_id: org.clerk_org_id,
     name: org.name,
     slug: org.slug,
-    plan: org.plan,
-    is_personal: org.is_personal,
+    plan_product_id: org.plan_product_id,
+    is_default: org.is_default,
     deleted_at: org.deleted_at,
     role: member.role,
     member_count: Number(countRow?.cnt ?? 0),
@@ -224,7 +248,7 @@ app.patch("/:id", withOrganization, withAdminRole, async (c) => {
 app.delete("/:id", withOrganization, withAdminRole, async (c) => {
   const { org, dbUserId } = c.get("orgCtx");
 
-  if (org.is_personal) {
+  if (org.is_default) {
     return c.json(
       { error: "Personal Org cannot be deleted", error_code: "PERSONAL_ORG_PROTECTED" },
       400
@@ -236,11 +260,36 @@ app.delete("/:id", withOrganization, withAdminRole, async (c) => {
     .set({ deleted_at: new Date() })
     .where(eq(organizations.id, org.id));
 
+  // D-01: org 삭제 시 활성 구독에 org_deleted_at 마킹 + 빌링키 파기
+  const [activeSub] = await db.select({ id: subscriptions.id, status: subscriptions.status })
+    .from(subscriptions)
+    .where(and(
+      eq(subscriptions.organization_id, org.id),
+      isNotNull(subscriptions.billing_key_encrypted),
+    ))
+    .limit(1);
+
+  if (activeSub) {
+    await db.update(subscriptions).set({
+      billing_key_encrypted: null,
+      org_deleted_at: new Date(),
+    }).where(eq(subscriptions.id, activeSub.id));
+
+    await recordSubscriptionHistory({
+      subscriptionId: activeSub.id,
+      fromStatus: activeSub.status as SubscriptionStatus,
+      toStatus: SUBSCRIPTION_STATUS.SUSPENDED,
+      billingKeyChanged: true,
+      changedBy: dbUserId,
+      reason: SUBSCRIPTION_HISTORY_REASON.ORG_SOFT_DELETE,
+    });
+  }
+
   // 삭제된 조직이 활성 조직이었다면 Personal Org로 default 전환
   const personalOrg = await db.query.organizations.findFirst({
     where: and(
       eq(organizations.owner_user_id, dbUserId),
-      eq(organizations.is_personal, true),
+      eq(organizations.is_default, true),
       isNull(organizations.deleted_at)
     ),
   });
@@ -296,6 +345,28 @@ app.post("/:id/restore", async (c) => {
     .set({ deleted_at: null })
     .where(eq(organizations.id, orgId));
 
+  // D-02: org 복원 시 구독 org_deleted_at 초기화 + 이력 기록
+  const [deletedSub] = await db.select({ id: subscriptions.id, status: subscriptions.status })
+    .from(subscriptions)
+    .where(and(
+      eq(subscriptions.organization_id, orgId),
+      isNotNull(subscriptions.org_deleted_at),
+    ))
+    .limit(1);
+
+  if (deletedSub) {
+    await db.update(subscriptions).set({ org_deleted_at: null })
+      .where(eq(subscriptions.id, deletedSub.id));
+
+    await recordSubscriptionHistory({
+      subscriptionId: deletedSub.id,
+      fromStatus: deletedSub.status as SubscriptionStatus,
+      toStatus: deletedSub.status as SubscriptionStatus,
+      changedBy: dbUser.id,
+      reason: SUBSCRIPTION_HISTORY_REASON.ORG_RESTORE,
+    });
+  }
+
   return c.json({ restored: true });
 });
 
@@ -342,30 +413,11 @@ const inviteSchema = z.object({
 app.post("/:id/members/invitations", withOrganization, withAdminRole, async (c) => {
   const { org } = c.get("orgCtx");
 
-  if (org.is_personal) {
-    return c.json(
-      { error: "Personal Org cannot have members", error_code: "PERSONAL_ORG_PROTECTED" },
-      400
-    );
-  }
-
-  // 멤버 한도 체크 (BR-32: Free=1, Pro=3)
-  const maxMembers = org.plan === "pro" ? 3 : 1;
-  const [countRow] = await db
-    .select({ cnt: count(organizationMembers.id) })
-    .from(organizationMembers)
-    .where(eq(organizationMembers.organization_id, org.id));
-
-  if (Number(countRow.cnt) >= maxMembers) {
-    return c.json(
-      {
-        error: `Member limit reached (${maxMembers})`,
-        error_code: "MEMBER_LIMIT_EXCEEDED",
-        current_plan: org.plan,
-        max_members: maxMembers,
-      },
-      409
-    );
+  // F-01/F-02: validateInviteCapacity로 통합 검증 (personal, free, max_members 포함)
+  const capacity = await validateInviteCapacity(org.id);
+  if (!capacity.allowed) {
+    const statusCode = capacity.code === "MEMBER_LIMIT_REACHED" ? 409 : 400;
+    return c.json({ error: capacity.code ?? "INVITE_NOT_ALLOWED", error_code: capacity.code }, statusCode);
   }
 
   const parsed = inviteSchema.safeParse(await c.req.json());
@@ -476,6 +528,62 @@ app.delete("/:id/members/:userId", withOrganization, withAdminRole, async (c) =>
     );
 
   return c.json({ deleted: true });
+});
+
+// ─── POST /api/org/:id/leave — 팀 탈퇴 (E-04) ────────────────────────────────
+
+app.post("/:id/leave", async (c) => {
+  const clerkUserId = getClerkUserId(c);
+  if (!clerkUserId) return c.json({ error: "Unauthorized" }, 401);
+
+  const orgId = c.req.param("id");
+  const dbUser = await getDbUser(clerkUserId);
+  if (!dbUser) return c.json({ error: "User not found" }, 404);
+
+  const org = await db.query.organizations.findFirst({
+    where: and(eq(organizations.id, orgId), isNull(organizations.deleted_at)),
+  });
+  if (!org) return c.json({ error: "Not found" }, 404);
+  if (org.is_default) return c.json({ error: "Personal org cannot be left", error_code: "PERSONAL_ORG_PROTECTED" }, 400);
+
+  const member = await db.query.organizationMembers.findFirst({
+    where: and(
+      eq(organizationMembers.organization_id, orgId),
+      eq(organizationMembers.user_id, dbUser.id),
+    ),
+  });
+  if (!member) return c.json({ error: "Not a member" }, 404);
+
+  // 마지막 admin 탈퇴 차단
+  if (member.role === "admin") {
+    const [otherAdmins] = await db
+      .select({ cnt: count(organizationMembers.id) })
+      .from(organizationMembers)
+      .where(and(
+        eq(organizationMembers.organization_id, orgId),
+        eq(organizationMembers.role, "admin"),
+        ne(organizationMembers.user_id, dbUser.id),
+      ));
+
+    if (Number(otherAdmins.cnt) === 0) {
+      return c.json({ error: "Cannot leave as last admin", error_code: "LAST_ADMIN" }, 400);
+    }
+  }
+
+  // Clerk 멤버십 제거 → webhook이 member_count 감소 + payer_warning 처리
+  const client = await clerkClient();
+  await client.organizations.deleteOrganizationMembership({
+    organizationId: org.clerk_org_id,
+    userId: clerkUserId,
+  });
+
+  // DB 즉시 반영 (webhook은 비동기이므로)
+  await db.delete(organizationMembers).where(and(
+    eq(organizationMembers.organization_id, orgId),
+    eq(organizationMembers.user_id, dbUser.id),
+  ));
+
+  return c.json({ ok: true });
 });
 
 export default app;
